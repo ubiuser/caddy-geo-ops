@@ -1,0 +1,27 @@
+{
+	admin off
+	auto_https off
+	order geo_ops first
+
+	servers {
+		# Trust the local client so X-Forwarded-For is honored, letting a manual
+		# curl drive lookups with a chosen IP.
+		trusted_proxies static 0.0.0.0/0 ::/0
+		client_ip_headers X-Forwarded-For
+	}
+
+	geo_ops {
+		db_path testdata
+	}
+}
+
+:9080 {
+	geo_ops
+
+	@gb geo_ops {
+		geoip2-city.country.iso_code GB
+	}
+	respond @gb "matched-GB country={geo.geoip2-city.country.iso_code} city={geo.geoip2-city.city.names.en} lat={geo.geoip2-city.location.latitude}" 200
+
+	respond "nomatch country=[{geo.geoip2-city.country.iso_code}] city=[{geo.geoip2-city.city.names.en}]" 200
+}

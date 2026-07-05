@@ -1,0 +1,6 @@
+# Normalize line endings to LF in the repo and on checkout (cross-platform Go;
+# keeps gofmt consistent between Windows dev and Linux CI).
+* text=auto eol=lf
+
+# Binary fixtures must never be line-ending normalized.
+*.mmdb binary

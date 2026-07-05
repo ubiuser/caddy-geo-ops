@@ -1,0 +1,36 @@
+# Caddy binaries built via xcaddy or the e2e module
+/caddy
+/caddy.exe
+caddy_*
+/e2e/caddy
+/e2e/caddy.exe
+# Bare `go build` in e2e/ names the binary after the module's last element (e2e)
+/e2e/e2e
+/e2e/e2e.exe
+
+# Go test / build output
+*.test
+*.out
+coverage.html
+*.prof
+
+# Go workspace (this repo wires modules via replace directives; a local
+# go.work is a dev-only convenience and shouldn't be committed)
+go.work
+go.work.sum
+
+# Release artifacts (download dir used by the release workflow)
+/dist/
+
+# Local environment / secrets (e.g. MAXMIND_LICENSE_KEY in a local .env)
+.env
+.env.*
+!.env.example
+
+# Editor / IDE (JetBrains GoLand)
+.idea/
+*.iml
+
+# OS cruft
+.DS_Store
+Thumbs.db
