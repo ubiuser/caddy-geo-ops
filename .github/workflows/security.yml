@@ -1,0 +1,84 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly run so advisories published against already-pinned dependencies
+  # surface even when no code changes.
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Known-vulnerability scan of the dependency tree. govulncheck uses call-graph
+  # analysis, so it only reports a CVE if the vulnerable symbol is reachable.
+  # Both modules are scanned; the root is what users compile into Caddy, e2e is
+  # the test harness (its findings are dev/CI hygiene).
+  govulncheck:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [".", "e2e"]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: govulncheck (${{ matrix.module }})
+        working-directory: ${{ matrix.module }}
+        run: govulncheck ./...
+
+  # Stable aggregate check for branch protection: passes only if govulncheck
+  # succeeded for every module, so required-status-checks can reference one fixed
+  # "govulncheck-gate" context instead of each per-module name. `if: always()` makes
+  # it run (and report) even when a matrix cell failed.
+  govulncheck-gate:
+    if: always()
+    needs: [govulncheck]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require govulncheck to have passed
+        run: |
+          if [ "${{ needs.govulncheck.result }}" != "success" ]; then
+            echo "govulncheck result: ${{ needs.govulncheck.result }}"
+            exit 1
+          fi
+
+  # On PRs, flag newly-introduced dependencies that carry known vulnerabilities
+  # or licenses incompatible with this project's MIT license.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+
+  # Scan the working tree / history for committed secrets (e.g. a MaxMind
+  # license key). gitleaks-action is free for public and personal repositories.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

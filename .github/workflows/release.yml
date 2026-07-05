@@ -1,0 +1,25 @@
+name: Release
+
+# On a version tag, publish a GitHub Release with auto-generated notes.
+#
+# No binaries are attached: a Caddy plugin is a library, composed into a Caddy
+# binary by the user via `xcaddy` at the tagged version (see the README). The
+# tag itself — fetchable from the Go module proxy — is the release; the notes
+# are a human-readable changelog for it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # No checkout/build needed: generate_release_notes is produced server-side
+      # by the GitHub API from the commits/PRs since the previous tag.
+      - name: Create release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          generate_release_notes: true

@@ -1,0 +1,34 @@
+# Path-based PR labels (consumed by .github/workflows/labeler.yml).
+# Labels must already exist in the repo; the action does not create them.
+# Only path-derivable categories live here — bug/feature/breaking-change are
+# applied by the author (see CONTRIBUTING.md).
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+          - LICENSE
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "go.mod"
+          - "go.sum"
+          - "e2e/go.mod"
+          - "e2e/go.sum"
+          - ".github/dependabot.yml"
+          - ".gitmodules"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+          - ".github/labeler.yml"
+          - ".github/release.yml"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*_test.go"
+          - "e2e/**"

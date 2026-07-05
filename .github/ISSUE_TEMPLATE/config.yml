@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & discussions
+    url: https://github.com/ubiuser/caddy-geo-ops/discussions
+    about: Ask usage questions or propose ideas here, not in the issue tracker.
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/ubiuser/caddy-geo-ops/security/policy
+    about: Please report vulnerabilities privately — do not open a public issue.
