@@ -1,0 +1,42 @@
+---
+version: 2
+updates:
+  # GitHub Actions used by the CI and release workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    open-pull-requests-limit: 1
+    groups:
+      actions-deps:
+        patterns:
+          - "*"
+    schedule:
+      interval: "monthly"
+
+  # Plugin (root) Go module.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    open-pull-requests-limit: 1
+    groups:
+      all-updates:
+        patterns:
+          - "*"
+    schedule:
+      interval: "monthly"
+
+  # e2e Go module (separate go.mod with the caddytest dep tree).
+  - package-ecosystem: "gomod"
+    directory: "/e2e"
+    open-pull-requests-limit: 1
+    groups:
+      all-updates:
+        patterns:
+          - "*"
+    schedule:
+      interval: "monthly"
+
+  # MaxMind-DB git submodule (test fixtures): bump to the latest tracked commit.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    open-pull-requests-limit: 1
+    schedule:
+      interval: "monthly"

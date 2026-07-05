@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Cross-OS + Go-version matrix. The module floor is Go 1.26 (the code uses the
+    # 1.26 new(expr) form), so the version axis is "go.mod floor" + "stable" rather
+    # than older releases that wouldn't compile. Windows/macOS catch path- and
+    # file-watcher (internal/dirmonitor) differences a Linux-only run would miss —
+    # the maintainer develops on Windows, but base CI ran only on Linux.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # '1.26' = the go.mod language floor (setup-go resolves the latest 1.26.x);
+        # 'stable' = the current release. Bump '1.26' when go.mod's floor moves.
+        go: ['1.26', 'stable']
+    runs-on: ${{ matrix.os }}
+    steps:
+      # submodules: recursive pulls the MaxMind-DB fixtures (test-data) used by
+      # internal/ops tests. MaxMind-DB has its own go.mod, so it is excluded
+      # from this module's ./... and never built or vetted here.
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: |
+            go.sum
+            e2e/go.sum
+
+      # Formatting (gofumpt) and vetting (govet, enable-all) are owned by the
+      # lint job — a hard gate over both modules — so they are not repeated here.
+      - name: Build
+        run: go build ./...
+
+      # Coverage is produced here (cheap -coverprofile overhead) rather than in a
+      # separate job that would re-run the suite. It's platform-independent, so only
+      # one cell uploads it — see the Codecov step below.
+      - name: Test (race + coverage)
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      # The e2e module is separate (own go.mod); it boots a real Caddy via
+      # caddytest and uses its own e2e/testdata fixtures. -race instruments the
+      # in-process server + watcher goroutines (the only place they run together).
+      - name: E2E tests
+        working-directory: e2e
+        run: go test -race ./...
+
+      # Upload from the single canonical cell only — coverage doesn't vary by OS or
+      # Go version, so the other matrix cells would just produce duplicate reports.
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.go == 'stable'
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
+        with:
+          files: coverage.out
+          # Public repos upload tokenless; for a private repo set the CODECOV_TOKEN
+          # secret. Until then, don't fail CI on a missing token.
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  lint:
+    runs-on: ubuntu-latest
+    # Hard gate: lint failures fail CI. The tree is clean under .golangci.yml's
+    # `default: all`; keep it that way (run `golangci-lint run` locally before
+    # pushing — and `cd e2e && golangci-lint run` for the e2e module).
+    strategy:
+      fail-fast: false
+      # Each Go module needs its own run: golangci-lint's ./... respects module
+      # boundaries, so the root invocation does not descend into e2e/. Both
+      # modules share the root .golangci.yml (golangci-lint walks up to find it).
+      matrix:
+        module: [".", "e2e"]
+    steps:
+      # No submodule needed: golangci-lint only lints the target module, and the
+      # MaxMind-DB submodule is a separate module it does not descend into.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint (${{ matrix.module }})
+        # Action major must match golangci-lint major: v7 ↔ golangci-lint v2.
+        uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7.0.1
+        with:
+          version: v2.11.4
+          working-directory: ${{ matrix.module }}

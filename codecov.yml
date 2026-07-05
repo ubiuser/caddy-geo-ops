@@ -1,0 +1,23 @@
+# Codecov configuration (https://docs.codecov.com/docs/codecov-yaml).
+# Coverage is informational, not a merge gate: the project's correctness bar is
+# the test + lint gates in CI, and a hard coverage threshold tends to reward
+# tests-for-coverage over meaningful ones.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: "reach, diff, files"
+  require_changes: true
+
+# The e2e module's coverage isn't collected (separate module, integration-style);
+# exclude generated/fixture paths from the report.
+ignore:
+  - "e2e/**"
+  - "**/*_test.go"
+  - "internal/**/export_test.go"

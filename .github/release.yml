@@ -1,0 +1,29 @@
+# Configures GitHub's auto-generated release notes (used by the Release workflow's
+# generate_release_notes). Merged PRs are grouped into sections by their labels;
+# the first matching category wins, so order matters and the "*" catch-all is last.
+# See CONTRIBUTING.md for the labels contributors should apply.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: ⚠️ Breaking Changes
+      labels:
+        - breaking-change
+    - title: 🎉 Features
+      labels:
+        - enhancement
+        - feature
+    - title: 🐛 Bug Fixes
+      labels:
+        - bug
+        - fix
+    - title: 📚 Documentation
+      labels:
+        - documentation
+    - title: ⬆️ Dependencies
+      labels:
+        - dependencies
+    - title: Other Changes
+      labels:
+        - "*"
