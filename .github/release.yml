@@ -21,6 +21,13 @@ changelog:
     - title: 📚 Documentation
       labels:
         - documentation
+    - title: 🧪 Tests
+      labels:
+        - tests
+    - title: 🔧 CI & Build
+      labels:
+        - ci
+        - github_actions
     - title: ⬆️ Dependencies
       labels:
         - dependencies
