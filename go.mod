@@ -1,6 +1,6 @@
 module github.com/ubiuser/caddy-geo-ops
 
-go 1.26.4
+go 1.26
 
 require (
 	github.com/caddyserver/caddy/v2 v2.11.4

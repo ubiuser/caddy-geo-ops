@@ -1,6 +1,6 @@
 module github.com/ubiuser/caddy-geo-ops/e2e
 
-go 1.26.4
+go 1.26
 
 // Separate module so the plugin's go.mod stays free of the Caddy server /
 // caddytest dependency tree. The plugin itself isn't published, so it is sourced
