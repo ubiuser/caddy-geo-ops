@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
+	"github.com/ubiuser/caddy-geo-ops/app"
 	"github.com/ubiuser/caddy-geo-ops/handler"
 )
 
@@ -111,5 +112,7 @@ func TestUnmarshalCaddyfile(t *testing.T) {
 func TestCaddyModuleID(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "http.handlers.geo_ops", string(new(handler.Handler).CaddyModule().ID))
+	// handler.go hard-codes this ID as a literal (moduledoc scanner requirement);
+	// assert it still tracks app.AppID so a namespace rename can't silently drift.
+	assert.Equal(t, "http.handlers."+app.AppID, string(new(handler.Handler).CaddyModule().ID))
 }

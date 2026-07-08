@@ -56,7 +56,11 @@ func init() {
 // CaddyModule returns the Caddy module information.
 func (*Handler) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
-		ID:  "http.handlers." + app.AppID,
+		// Must be a static string literal ("http.handlers." + app.AppID), not a
+		// concatenation: caddyserver.com's moduledoc scanner reads this field via
+		// AST and only accepts a literal, so a computed ID here makes the plugin
+		// unregisterable on the download page.
+		ID:  "http.handlers.geo_ops",
 		New: func() caddy.Module { return new(Handler) },
 	}
 }

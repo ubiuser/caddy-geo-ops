@@ -125,3 +125,11 @@ func TestUnmarshalCaddyfileErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCaddyModuleID(t *testing.T) {
+	t.Parallel()
+
+	// app.go hard-codes this ID as a literal (moduledoc scanner requirement);
+	// assert it still equals app.AppID so a namespace rename can't silently drift.
+	assert.Equal(t, app.AppID, string(new(app.App).CaddyModule().ID))
+}

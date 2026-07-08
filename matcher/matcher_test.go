@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
+	"github.com/ubiuser/caddy-geo-ops/app"
 	"github.com/ubiuser/caddy-geo-ops/matcher"
 )
 
@@ -152,4 +153,12 @@ func TestMatchWithError(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestCaddyModuleID(t *testing.T) {
+	t.Parallel()
+
+	// matcher.go hard-codes this ID as a literal (moduledoc scanner requirement);
+	// assert it still tracks app.AppID so a namespace rename can't silently drift.
+	assert.Equal(t, "http.matchers."+app.AppID, string(new(matcher.Matcher).CaddyModule().ID))
 }
