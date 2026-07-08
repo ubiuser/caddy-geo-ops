@@ -111,5 +111,5 @@ func TestUnmarshalCaddyfile(t *testing.T) {
 func TestCaddyModuleID(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "http.handlers.geo_ops", string((new(handler.Handler{})).CaddyModule().ID))
+	assert.Equal(t, "http.handlers.geo_ops", string(new(handler.Handler).CaddyModule().ID))
 }

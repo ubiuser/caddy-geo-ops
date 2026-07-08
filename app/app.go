@@ -55,7 +55,7 @@ var (
 )
 
 func init() {
-	caddy.RegisterModule(new(App{}))
+	caddy.RegisterModule(new(App))
 	httpcaddyfile.RegisterGlobalOption(AppID, parseGlobalOption)
 }
 

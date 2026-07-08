@@ -49,7 +49,7 @@ var (
 )
 
 func init() {
-	caddy.RegisterModule(new(Handler{}))
+	caddy.RegisterModule(new(Handler))
 	httpcaddyfile.RegisterHandlerDirective(app.AppID, parseCaddyfile)
 }
 
