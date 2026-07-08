@@ -10,9 +10,11 @@ build with `xcaddy` and upgrade to pick up fixes.
 
 **Please do not open a public issue for security problems.**
 
-Report privately via GitHub's [private vulnerability reporting](https://docs.github.com/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
-(the **Security → Report a vulnerability** button on this repository), or by email to
-**ubiuser@gmail.com**.
+The preferred channel is GitHub's [private vulnerability reporting](https://docs.github.com/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability):
+use the **Security → Report a vulnerability** button on this repository. It opens a
+private draft advisory we can triage, fix, and publish (with a CVE) directly on GitHub.
+
+If you can't use that channel, email **ubiuser@gmail.com** as a fallback.
 
 Please include:
 
