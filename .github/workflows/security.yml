@@ -33,6 +33,12 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
+          # Resolve to the newest patch of the go.mod minor (e.g. 1.26.5, not a
+          # cached 1.26.4). Go standard-library advisories are fixed in patch
+          # releases, so the scan must run on the patched toolchain — otherwise
+          # govulncheck fails on stdlib CVEs the plugin cannot itself avoid
+          # (the consumer's toolchain, not this code, is what actually matters).
+          check-latest: true
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest

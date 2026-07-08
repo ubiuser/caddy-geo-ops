@@ -40,6 +40,9 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ matrix.go }}
+          # Use the newest patch for each version axis (e.g. 1.26.5, not a cached
+          # 1.26.4) so builds and tests run on the latest stdlib security fixes.
+          check-latest: true
           cache-dependency-path: |
             go.sum
             e2e/go.sum
@@ -98,6 +101,8 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
+          # Newest patch of the go.mod minor, matching the other jobs.
+          check-latest: true
 
       - name: golangci-lint (${{ matrix.module }})
         # Action major must match golangci-lint major: v7 ↔ golangci-lint v2.
