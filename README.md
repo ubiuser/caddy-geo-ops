@@ -6,7 +6,7 @@
 [![codecov](https://codecov.io/gh/ubiuser/caddy-geo-ops/graph/badge.svg)](https://codecov.io/gh/ubiuser/caddy-geo-ops)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/ubiuser/caddy-geo-ops/badge)](https://scorecard.dev/viewer/?uri=github.com/ubiuser/caddy-geo-ops)
 [![Go Reference](https://pkg.go.dev/badge/github.com/ubiuser/caddy-geo-ops.svg)](https://pkg.go.dev/github.com/ubiuser/caddy-geo-ops)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ubiuser/caddy-geo-ops)](https://goreportcard.com/report/github.com/ubiuser/caddy-geo-ops)
+[![golangci-lint](https://img.shields.io/badge/lint-golangci--lint-4b9fd5)](.golangci.yml)
 [![Latest release](https://img.shields.io/github/v/release/ubiuser/caddy-geo-ops?sort=semver)](https://github.com/ubiuser/caddy-geo-ops/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
