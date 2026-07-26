@@ -8,11 +8,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
-
 	"github.com/ubiuser/caddy-geo-ops/internal/db"
 	"github.com/ubiuser/caddy-geo-ops/internal/ops"
 	"github.com/ubiuser/caddy-geo-ops/internal/update"
+	"go.uber.org/zap/zaptest"
 )
 
 const (

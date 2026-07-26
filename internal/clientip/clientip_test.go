@@ -8,7 +8,6 @@ import (
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/stretchr/testify/assert"
-
 	"github.com/ubiuser/caddy-geo-ops/internal/clientip"
 )
 

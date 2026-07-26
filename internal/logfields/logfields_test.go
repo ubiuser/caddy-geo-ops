@@ -6,10 +6,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/ubiuser/caddy-geo-ops/internal/logfields"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
-	"github.com/ubiuser/caddy-geo-ops/internal/logfields"
 )
 
 // TestFields locks in the key and zap field type each constructor produces —

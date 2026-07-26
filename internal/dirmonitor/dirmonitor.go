@@ -11,9 +11,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"go.uber.org/zap"
-
 	"github.com/ubiuser/caddy-geo-ops/internal/logfields"
+	"go.uber.org/zap"
 )
 
 type (

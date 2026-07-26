@@ -8,10 +8,9 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
-
 	"github.com/ubiuser/caddy-geo-ops/app"
 	"github.com/ubiuser/caddy-geo-ops/internal/ops"
+	"go.uber.org/zap/zaptest"
 )
 
 func TestValidate(t *testing.T) {

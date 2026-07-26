@@ -19,10 +19,9 @@ import (
 	"time"
 
 	"github.com/maxmind/geoipupdate/v7/client"
-	"go.uber.org/zap"
-
 	"github.com/ubiuser/caddy-geo-ops/internal/db"
 	"github.com/ubiuser/caddy-geo-ops/internal/logfields"
+	"go.uber.org/zap"
 )
 
 type (

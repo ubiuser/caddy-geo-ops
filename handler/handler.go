@@ -14,10 +14,9 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"go.uber.org/zap"
-
 	"github.com/ubiuser/caddy-geo-ops/app"
 	"github.com/ubiuser/caddy-geo-ops/internal/clientip"
+	"go.uber.org/zap"
 )
 
 type (

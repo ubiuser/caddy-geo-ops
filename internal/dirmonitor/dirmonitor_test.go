@@ -8,9 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
-
 	"github.com/ubiuser/caddy-geo-ops/internal/dirmonitor"
+	"go.uber.org/zap/zaptest"
 )
 
 // newTestMonitor starts a monitor on a fresh temp dir, returning the dir and

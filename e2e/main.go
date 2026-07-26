@@ -9,10 +9,9 @@
 package main
 
 import (
+	caddycmd "github.com/caddyserver/caddy/v2/cmd"
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
 	_ "github.com/ubiuser/caddy-geo-ops"
-
-	caddycmd "github.com/caddyserver/caddy/v2/cmd"
 )
 
 func main() {

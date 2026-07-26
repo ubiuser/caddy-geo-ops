@@ -15,9 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
-
 	"github.com/ubiuser/caddy-geo-ops/internal/db"
+	"go.uber.org/zap/zaptest"
 )
 
 func nopInfo() map[db.Filename]string { return nil }

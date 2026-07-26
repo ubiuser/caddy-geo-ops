@@ -12,12 +12,11 @@ import (
 	"path/filepath"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/ubiuser/caddy-geo-ops/internal/db"
 	"github.com/ubiuser/caddy-geo-ops/internal/dirmonitor"
 	"github.com/ubiuser/caddy-geo-ops/internal/logfields"
 	"github.com/ubiuser/caddy-geo-ops/internal/update"
+	"go.uber.org/zap"
 )
 
 type (

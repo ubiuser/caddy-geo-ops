@@ -9,7 +9,6 @@ import (
 	"os"
 
 	"github.com/oschwald/maxminddb-golang/v2"
-
 	"github.com/ubiuser/caddy-geo-ops/internal/db"
 	"github.com/ubiuser/caddy-geo-ops/internal/replacers"
 )

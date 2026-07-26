@@ -11,10 +11,9 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
-
 	"github.com/ubiuser/caddy-geo-ops/app"
 	"github.com/ubiuser/caddy-geo-ops/matcher"
+	"go.uber.org/zap/zaptest"
 )
 
 // fakeApp is a stand-in for *app.App that returns canned lookup data.
