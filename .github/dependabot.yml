@@ -32,6 +32,12 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    ignore:
+      # cel-go's version is dictated by caddy (v2.11.4 needs 0.28.x); a newer
+      # cel-go changes interpreter.NewCall and breaks caddy's own celmatcher.go,
+      # so these PRs can never build. It moves only when caddy is bumped — don't
+      # let Dependabot propose it on its own.
+      - dependency-name: "github.com/google/cel-go"
 
   # e2e Go module (separate go.mod with the caddytest dep tree).
   - package-ecosystem: "gomod"
@@ -48,6 +54,10 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    ignore:
+      # Same as the root module: cel-go is caddy-pinned (v2.11.4 needs 0.28.x);
+      # a newer cel-go breaks caddy's celmatcher.go build. Only moves with caddy.
+      - dependency-name: "github.com/google/cel-go"
 
   # MaxMind-DB git submodule (test fixtures): bump to the latest tracked commit.
   - package-ecosystem: "gitsubmodule"
