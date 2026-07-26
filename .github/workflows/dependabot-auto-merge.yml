@@ -7,14 +7,18 @@ name: Dependabot auto-merge
 # requiring the CI/lint checks — otherwise auto-merge has nothing to wait on.
 on: pull_request
 
+# Least privilege (Scorecard Token-Permissions): default read-only at the top
+# level; the auto-merge job opts into the writes it needs.
 permissions:
-  contents: write       # enable auto-merge / merge the PR
-  pull-requests: write  # approve the PR
+  contents: read
 
 jobs:
   auto-merge:
     if: github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # enable auto-merge / merge the PR
+      pull-requests: write  # approve the PR
     steps:
       - name: Fetch Dependabot metadata
         id: meta
