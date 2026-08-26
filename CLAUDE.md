@@ -173,13 +173,13 @@ App config is a global option; the handler is a directive; the matcher is a name
 {
     order geo_ops first
     geo_ops {
-        db_path          /var/lib/geoip
-        auto_update                       # optional
-        account_id       123456           # MaxMind, only with auto_update
-        license_key      xxxxxxxx         # MaxMind, only with auto_update
+        db_path           /var/lib/geoip
+        auto_update                        # optional
+        account_id        123456           # MaxMind, only with auto_update
+        license_key       xxxxxxxx         # MaxMind, only with auto_update
         ip2location_token xxxxxxxx         # IP2Location, only with auto_update
-        update_frequency 24h
-        update_timeout   30s
+        update_frequency  24h
+        update_timeout    30s
     }
 }
 

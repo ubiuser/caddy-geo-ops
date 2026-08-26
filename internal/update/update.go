@@ -1,8 +1,10 @@
 // Package update periodically refreshes database files that already exist in
 // the db folder. MaxMind editions are fetched via the geoipupdate client
 // (Account ID + License Key); DB-IP Lite editions are fetched from hardcoded
-// public URLs. Downloads are written to a temp file and atomically renamed over
-// the target, which the dirmonitor then picks up and reloads.
+// public URLs; IP2Location LITE editions are fetched from IP2Location's
+// download endpoint using a download token. Downloads are written to a temp
+// file and atomically renamed over the target, which the dirmonitor then
+// picks up and reloads.
 package update
 
 import (
@@ -27,8 +29,11 @@ import (
 )
 
 type (
-	// Config configures the Updater. MaxMind credentials are optional: if absent,
-	// only DB-IP databases are updated.
+	// Config configures the Updater. Each vendor's credentials are independent
+	// and gate only that vendor's databases: MaxMind needs AccountID +
+	// LicenseKey, IP2Location needs IP2LocationToken, and DB-IP needs neither.
+	// A vendor whose credentials are absent has its databases skipped on every
+	// update pass; the others keep updating normally.
 	Config struct {
 		DBInfoFn         func() map[db.Filename]string
 		DBPath           string

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -592,6 +593,39 @@ func TestDownloadIP2LocationContextCanceled(t *testing.T) {
 		"the token must never appear in an error message, even from the underlying *url.Error")
 }
 
+func TestRedactToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty token passes through unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		err := assert.AnError
+
+		got := redactToken(err, "")
+		assert.Samef(t, err, got, "an empty token must return the exact same error value, not a wrapper")
+	})
+
+	t.Run("nil error passes through as nil", func(t *testing.T) {
+		t.Parallel()
+
+		got := redactToken(nil, "some-token")
+		assert.NoErrorf(t, got, "a nil error must return nil regardless of token")
+	})
+
+	t.Run("populated token is redacted but the chain is preserved", func(t *testing.T) {
+		t.Parallel()
+
+		const token = "super-secret-token"
+
+		underlying := fmt.Errorf("dial tcp example.invalid?token=%s: %w", token, context.Canceled)
+
+		got := redactToken(underlying, token)
+		require.Error(t, got)
+		assert.NotContainsf(t, got.Error(), token, "the token must be scrubbed from the message")
+		assert.ErrorIsf(t, got, context.Canceled, "errors.Is must still reach the wrapped sentinel")
+	})
+}
+
 // ip2locationUpdaterWithFile builds an updater whose db folder holds one
 // IP2Location file, plus a getDBInfo reporting it.
 func ip2locationUpdaterWithFile(t *testing.T, srvURL, token string) *Updater {
@@ -624,10 +658,13 @@ func TestUpdateAllIP2LocationGatedByToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// No token configured: updateAll must not hit the server at all.
+	// No token configured: updateAll must not hit the server at all. This must
+	// be fatal: if a token-gate regression lets a spurious hit through here,
+	// letting the test limp into phase 2 below would risk masking the failure
+	// behind a passing (but misleading) second assertion.
 	u := ip2locationUpdaterWithFile(t, srv.URL, "")
 	u.updateAll(t.Context(), false)
-	assert.Zerof(t, hits.Load(), "no token configured -> IP2Location databases must be skipped")
+	require.Zerof(t, hits.Load(), "no token configured -> IP2Location databases must be skipped")
 
 	// Token configured: updateAll must check it.
 	u2 := ip2locationUpdaterWithFile(t, srv.URL, "tok")
