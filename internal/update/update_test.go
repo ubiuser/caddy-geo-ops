@@ -591,3 +591,46 @@ func TestDownloadIP2LocationContextCanceled(t *testing.T) {
 	assert.NotContainsf(t, err.Error(), "test-token",
 		"the token must never appear in an error message, even from the underlying *url.Error")
 }
+
+// ip2locationUpdaterWithFile builds an updater whose db folder holds one
+// IP2Location file, plus a getDBInfo reporting it.
+func ip2locationUpdaterWithFile(t *testing.T, srvURL, token string) *Updater {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, string(db.IP2LocationCountry))
+	require.NoError(t, os.WriteFile(path, []byte("x"), 0o600))
+
+	return &Updater{
+		logger:           zaptest.NewLogger(t),
+		dbPath:           dir,
+		httpClient:       &http.Client{},
+		frequency:        time.Hour,
+		timeout:          5 * time.Second,
+		ip2locationURL:   srvURL,
+		ip2locationToken: token,
+		getDBInfo:        func() map[db.Filename]string { return map[db.Filename]string{db.IP2LocationCountry: ""} },
+	}
+}
+
+func TestUpdateAllIP2LocationGatedByToken(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer srv.Close()
+
+	// No token configured: updateAll must not hit the server at all.
+	u := ip2locationUpdaterWithFile(t, srv.URL, "")
+	u.updateAll(t.Context(), false)
+	assert.Zerof(t, hits.Load(), "no token configured -> IP2Location databases must be skipped")
+
+	// Token configured: updateAll must check it.
+	u2 := ip2locationUpdaterWithFile(t, srv.URL, "tok")
+	u2.updateAll(t.Context(), false)
+	assert.NotZerof(t, hits.Load(), "token configured -> IP2Location databases must be checked")
+}

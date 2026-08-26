@@ -174,6 +174,7 @@ func (u *Updater) Start() {
 		logfields.MaxmindEnabled(u.maxmind != nil),
 	)
 	u.warnIfMaxmindUnconfigured()
+	u.warnIfIP2LocationUnconfigured()
 
 	ticker := time.NewTicker(u.frequency)
 
@@ -222,6 +223,25 @@ func (u *Updater) warnIfMaxmindUnconfigured() {
 	for filename := range u.getDBInfo() {
 		if db.IsGeoIP2OrGeoLite2(db.ToType(filename)) {
 			u.logger.Warn("MaxMind databases present but no credentials configured; " +
+				"they will not be auto-updated")
+
+			return
+		}
+	}
+}
+
+// warnIfIP2LocationUnconfigured warns once at startup when IP2Location
+// databases are present but no token is configured, so the operator knows
+// those files will silently never be auto-updated (the per-cycle skip is only
+// logged at debug).
+func (u *Updater) warnIfIP2LocationUnconfigured() {
+	if u.ip2locationToken != "" {
+		return
+	}
+
+	for filename := range u.getDBInfo() {
+		if db.IsIP2Location(db.ToType(filename)) {
+			u.logger.Warn("IP2Location databases present but no token configured; " +
 				"they will not be auto-updated")
 
 			return
@@ -301,6 +321,17 @@ func (u *Updater) updateAll(ctx context.Context, initial bool) {
 
 		case db.IsDBIP(dbType):
 			u.run(filename, func() (bool, error) { return u.downloadDBIP(ctx, dbType, filename) })
+
+		case db.IsIP2Location(dbType):
+			if u.ip2locationToken == "" {
+				u.logger.Debug("skipping IP2Location database; no token configured",
+					logfields.Database(string(filename)),
+				)
+
+				continue
+			}
+
+			u.run(filename, func() (bool, error) { return u.downloadIP2Location(ctx, dbType, filename) })
 		}
 	}
 }
