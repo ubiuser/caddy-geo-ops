@@ -6,6 +6,8 @@
 package update
 
 import (
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -81,6 +83,8 @@ var (
 	// existing database keeps serving — so it is logged at debug, not error.
 	errDBIPNotPublished = errors.New("db-ip database not yet published")
 	errNoDBIPUrl        = errors.New("no DB-IP url")
+
+	errIP2LocationEntryNotFound = errors.New("no .mmdb entry found in IP2Location zip")
 )
 
 // New creates an Updater. It does not start any goroutines; call Start.
@@ -454,6 +458,33 @@ func (u *Updater) writeAtomic(filename db.Filename, r io.Reader) error {
 	}
 
 	return nil
+}
+
+// extractMMDB locates the .mmdb entry inside an IP2Location download zip
+// (which also contains a license file and a README) and returns a reader over
+// its decompressed contents. zip.NewReader needs random access for the
+// central directory, so the whole archive must already be in memory — unlike
+// DB-IP's plain gzip stream, this can't be handled as a single io.Reader pipe.
+func extractMMDB(data []byte) (io.ReadCloser, error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("open zip: %w", err)
+	}
+
+	for _, f := range zr.File {
+		if !strings.HasSuffix(strings.ToLower(f.Name), ".mmdb") {
+			continue
+		}
+
+		rc, openErr := f.Open()
+		if openErr != nil {
+			return nil, fmt.Errorf("open zip entry %s: %w", f.Name, openErr)
+		}
+
+		return rc, nil
+	}
+
+	return nil, errIP2LocationEntryNotFound
 }
 
 // dbipURL returns the DB-IP Lite download URL for a type and month.

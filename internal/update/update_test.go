@@ -1,9 +1,11 @@
 package update //nolint:testpackage // package internals are heavily used in tests here
 
 import (
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -413,4 +415,63 @@ func TestIP2LocationFileCode(t *testing.T) {
 
 	_, ok = ip2locationFileCode(db.GeoIP2CityType)
 	assert.Falsef(t, ok, "non-IP2Location type should not yield a file code")
+}
+
+func buildZip(t *testing.T, entries map[string][]byte) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+
+	zw := zip.NewWriter(&buf)
+
+	for name, content := range entries {
+		w, err := zw.Create(name)
+		require.NoError(t, err)
+
+		_, err = w.Write(content)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, zw.Close())
+
+	return buf.Bytes()
+}
+
+func TestExtractMMDB(t *testing.T) {
+	t.Parallel()
+
+	z := buildZip(t, map[string][]byte{
+		"LICENSE-CC-BY-SA-4.0.TXT":  []byte("license"),
+		"README_LITE.TXT":           []byte("readme"),
+		"IP2LOCATION-LITE-DB1.MMDB": []byte("fake-mmdb-bytes"),
+	})
+
+	rc, err := extractMMDB(z)
+	require.NoError(t, err)
+
+	defer rc.Close()
+
+	got, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Equal(t, "fake-mmdb-bytes", string(got))
+}
+
+func TestExtractMMDBNoEntry(t *testing.T) {
+	t.Parallel()
+
+	z := buildZip(t, map[string][]byte{
+		"LICENSE-CC-BY-SA-4.0.TXT": []byte("license"),
+		"README_LITE.TXT":          []byte("readme"),
+	})
+
+	_, err := extractMMDB(z)
+	assert.ErrorIsf(t, err, errIP2LocationEntryNotFound, "zip without a .mmdb entry")
+}
+
+func TestExtractMMDBCorrupt(t *testing.T) {
+	t.Parallel()
+
+	_, err := extractMMDB([]byte("not a zip file"))
+	require.Error(t, err)
+	assert.NotErrorIsf(t, err, errIP2LocationEntryNotFound, "corrupt data is a different error")
 }
