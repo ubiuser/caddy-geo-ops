@@ -214,9 +214,18 @@ none either, per the non-goals above).
 ### 5. Docs
 
 - `README.md`: config option table/example gains `ip2location_token`; the placeholder
-  scheme examples gain an IP2Location line (e.g.
-  `{geo.ip2location-city.city_name}` — exact field names to be confirmed once a real
-  decoded record is inspected during implementation).
+  scheme examples gain an IP2Location line. **Field schema confirmed identical to
+  MaxMind's** (updated after this spec was first written): during plan authoring, the
+  three real IP2Location LITE MMDB files were downloaded with a live token and decoded
+  against the test IP `81.2.69.142` via `maxminddb-golang/v2`. Results were field-for-field
+  identical to GeoIP2/GeoLite2's schema — `continent.code`/`continent.names.*`,
+  `country.iso_code`/`country.names.*`, `registered_country.*` (Country); those plus
+  `city.names.en`, `location.latitude`/`longitude`/`time_zone`, `postal.code`,
+  `subdivisions.0.iso_code`/`names.*` (City); `autonomous_system_number`/
+  `autonomous_system_organization` (ASN). So `{geo.ip2location-city.city.names.en}` etc.
+  resolve the same field paths as `{geo.geoip2-city.city.names.en}` — no placeholder guess
+  needed; the README's Field reference by edition section adds `ip2location-*` to the
+  existing City/Country/ASN edition lists rather than duplicating field blocks.
 - `CLAUDE.md`: **Auto-update** section gains an "IP2Location" bullet (LITE-only, single
   token, no MaxMind-style account/license pairing, conditional via `If-Modified-Since`,
   zip-wrapped so needs extraction unlike DB-IP's plain gzip). **Database file naming**
