@@ -37,6 +37,10 @@ const (
 	DBIPCity    Filename = "dbip-city-lite.mmdb"
 	DBIPCountry Filename = "dbip-country-lite.mmdb"
 	DBIPASN     Filename = "dbip-asn-lite.mmdb"
+
+	IP2LocationCountry Filename = "ip2location-country.mmdb"
+	IP2LocationCity    Filename = "ip2location-city.mmdb"
+	IP2LocationASN     Filename = "ip2location-asn.mmdb"
 )
 
 // ToFilename converts the file path to a lowercase file name used as the
