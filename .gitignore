@@ -34,3 +34,6 @@ go.work.sum
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# Superpowers subagent-driven-development scratch workspace
+.superpowers/
