@@ -24,14 +24,15 @@ type (
 	//
 	//nolint:tagliatelle // snake_case is the Caddyfile convention
 	App struct {
-		ops             *ops.Ops
-		logger          *zap.Logger
-		DBPath          string         `json:"db_path,omitempty"`
-		LicenseKey      string         `json:"license_key,omitempty"`
-		AccountID       int            `json:"account_id,omitempty"`
-		UpdateFrequency caddy.Duration `json:"update_frequency,omitempty"`
-		UpdateTimeout   caddy.Duration `json:"update_timeout,omitempty"`
-		AutoUpdate      bool           `json:"auto_update,omitempty"`
+		ops              *ops.Ops
+		logger           *zap.Logger
+		DBPath           string         `json:"db_path,omitempty"`
+		LicenseKey       string         `json:"license_key,omitempty"`
+		IP2LocationToken string         `json:"ip2location_token,omitempty"`
+		AccountID        int            `json:"account_id,omitempty"`
+		UpdateFrequency  caddy.Duration `json:"update_frequency,omitempty"`
+		UpdateTimeout    caddy.Duration `json:"update_timeout,omitempty"`
+		AutoUpdate       bool           `json:"auto_update,omitempty"`
 	}
 )
 
@@ -104,8 +105,10 @@ func (a *App) Validate() error {
 
 	// Credentials configured but auto_update is off: harmless, but they have no
 	// effect, so warn rather than fail.
-	if (a.AccountID > 0 || a.LicenseKey != "") && a.logger != nil {
-		a.logger.Warn("account_id/license_key are set but auto_update is disabled; they have no effect")
+	if (a.AccountID > 0 || a.LicenseKey != "" || a.IP2LocationToken != "") && a.logger != nil {
+		a.logger.Warn(
+			"account_id/license_key/ip2location_token are set but auto_update is disabled; they have no effect",
+		)
 	}
 
 	return nil
@@ -119,10 +122,11 @@ func (a *App) Start() error {
 
 	if a.AutoUpdate {
 		if err := a.ops.StartUpdater(update.Config{
-			AccountID:  a.AccountID,
-			LicenseKey: a.LicenseKey,
-			Frequency:  time.Duration(a.UpdateFrequency),
-			Timeout:    time.Duration(a.UpdateTimeout),
+			AccountID:        a.AccountID,
+			LicenseKey:       a.LicenseKey,
+			IP2LocationToken: a.IP2LocationToken,
+			Frequency:        time.Duration(a.UpdateFrequency),
+			Timeout:          time.Duration(a.UpdateTimeout),
 		}); err != nil {
 			return fmt.Errorf("start updater: %w", err)
 		}
@@ -169,15 +173,16 @@ func (a *App) LookupAll(addr netip.Addr) map[string]string {
 // UnmarshalCaddyfile parses the geo_ops global option block.
 //
 //	geo_ops {
-//	    db_path          /var/lib/geoip
+//	    db_path            /var/lib/geoip
 //	    auto_update
-//	    account_id       123456
-//	    license_key      xxxxxxxx
-//	    update_frequency 24h
-//	    update_timeout   30s
+//	    account_id         123456
+//	    license_key        xxxxxxxx
+//	    ip2location_token  xxxxxxxx
+//	    update_frequency   24h
+//	    update_timeout     30s
 //	}
 //
-//nolint:cyclop,gocognit // nested block is unavoidable
+//nolint:cyclop,funlen,gocognit // nested block is unavoidable
 func (a *App) UnmarshalCaddyfile(dispenser *caddyfile.Dispenser) error {
 	for dispenser.Next() {
 		for dispenser.NextBlock(0) {
@@ -214,6 +219,13 @@ func (a *App) UnmarshalCaddyfile(dispenser *caddyfile.Dispenser) error {
 				}
 
 				a.LicenseKey = dispenser.Val()
+
+			case "ip2location_token":
+				if !dispenser.NextArg() {
+					return fmt.Errorf("ip2location_token requires an argument: %w", dispenser.ArgErr())
+				}
+
+				a.IP2LocationToken = dispenser.Val()
 
 			case "update_frequency":
 				if !dispenser.NextArg() {
