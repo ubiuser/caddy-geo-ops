@@ -475,3 +475,119 @@ func TestExtractMMDBCorrupt(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIsf(t, err, errIP2LocationEntryNotFound, "corrupt data is a different error")
 }
+
+// newIP2LocationUpdater builds an Updater wired for IP2Location download
+// tests. token mirrors newDBIPUpdater's baseURL parameter: always "test-token"
+// today, kept as a parameter so a future test asserting per-token behaviour
+// doesn't need to touch this helper's signature.
+//
+//nolint:unparam // see doc comment above
+func newIP2LocationUpdater(t *testing.T, baseURL, token string) *Updater {
+	t.Helper()
+
+	return &Updater{
+		dbPath:           t.TempDir(),
+		httpClient:       &http.Client{},
+		timeout:          5 * time.Second,
+		ip2locationURL:   baseURL,
+		ip2locationToken: token,
+	}
+}
+
+func ip2locationZipBytes(t *testing.T, mmdbPayload []byte) []byte {
+	t.Helper()
+
+	return buildZip(t, map[string][]byte{
+		"LICENSE-CC-BY-SA-4.0.TXT":  []byte("license"),
+		"README_LITE.TXT":           []byte("readme"),
+		"IP2LOCATION-LITE-DB1.MMDB": mmdbPayload,
+	})
+}
+
+func TestDownloadIP2Location(t *testing.T) {
+	t.Parallel()
+
+	payload := []byte("fake-ip2location-mmdb-bytes")
+	zipData := ip2locationZipBytes(t, payload)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "test-token", r.URL.Query().Get("token"))
+		assert.Equal(t, "DB1LITEMMDB", r.URL.Query().Get("file"))
+
+		if r.Header.Get("If-Modified-Since") != "" {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/zip")
+
+		_, _ = w.Write(zipData)
+	}))
+	defer srv.Close()
+
+	u := newIP2LocationUpdater(t, srv.URL, "test-token")
+
+	// First download: file absent -> downloaded and extracted.
+	updated, err := u.downloadIP2Location(t.Context(), db.IP2LocationCountryType, db.IP2LocationCountry)
+	require.NoError(t, err)
+	assert.Truef(t, updated, "expected updated=true on first download")
+
+	got, err := os.ReadFile(filepath.Join(u.dbPath, string(db.IP2LocationCountry)))
+	require.NoError(t, err)
+	assert.Equal(t, payload, got)
+
+	// Second download: file now exists -> conditional request -> 304 -> no update.
+	updated, err = u.downloadIP2Location(t.Context(), db.IP2LocationCountryType, db.IP2LocationCountry)
+	require.NoError(t, err)
+	assert.Falsef(t, updated, "expected updated=false on 304 Not Modified")
+}
+
+func TestDownloadIP2LocationUnexpectedStatus(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	u := newIP2LocationUpdater(t, srv.URL, "test-token")
+
+	_, err := u.downloadIP2Location(t.Context(), db.IP2LocationCountryType, db.IP2LocationCountry)
+	require.Error(t, err)
+	assert.NotContainsf(t, err.Error(), "test-token", "the token must never appear in an error message")
+}
+
+func TestDownloadIP2LocationUnknownType(t *testing.T) {
+	t.Parallel()
+
+	u := newIP2LocationUpdater(t, "http://example.invalid", "test-token")
+
+	_, err := u.downloadIP2Location(t.Context(), db.GeoIP2CityType, db.GeoIP2City)
+	assert.ErrorIsf(t, err, errNoIP2LocationCode, "unknown type should error before making a request")
+}
+
+func TestDownloadIP2LocationContextCanceled(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	u := newIP2LocationUpdater(t, srv.URL, "test-token")
+
+	u.timeout = time.Minute
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // cancelled before the request is made
+
+	_, err := u.downloadIP2Location(ctx, db.IP2LocationCountryType, db.IP2LocationCountry)
+	require.Error(t, err)
+	assert.ErrorIsf(t, err, context.Canceled, "a cancelled context must abort the download")
+
+	// Regression: http.Client.Do returns a *url.Error whose Error() embeds the
+	// full request URL (including the token) even on a context-cancellation
+	// failure — this must not leak into the wrapped error's message.
+	assert.NotContainsf(t, err.Error(), "test-token",
+		"the token must never appear in an error message, even from the underlying *url.Error")
+}

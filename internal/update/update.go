@@ -48,12 +48,25 @@ type (
 		cancel           context.CancelFunc
 		dbPath           string
 		baseURL          string
-		ip2locationURL   string //nolint:unused // used by Task 4 (download implementation)
+		ip2locationURL   string
 		ip2locationToken string
 		wg               sync.WaitGroup
 		frequency        time.Duration
 		timeout          time.Duration
 		closeOnce        sync.Once
+	}
+
+	// tokenRedactedError wraps an error whose formatted message may embed the
+	// IP2Location download token — notably *url.Error, which net/http returns
+	// from both http.NewRequestWithContext (a malformed URL) and http.Client.Do
+	// (dial/timeout/context-cancellation failures): its Error() renders the
+	// full request URL, query string and all. Error() scrubs the token from
+	// that rendered text; Unwrap() still exposes the original error so
+	// errors.Is/As (e.g. errors.Is(err, context.Canceled)) keep working
+	// through the wrapper.
+	tokenRedactedError struct {
+		err   error
+		token string
 	}
 )
 
@@ -69,6 +82,12 @@ const (
 	tmpSuffix = ".tmp-"
 
 	yyyyMMFormat = "2006-01"
+
+	// errUnknownTypeFmt wraps a "no download URL/code for this type" sentinel
+	// with the offending db.Type; shared by downloadDBIP and downloadIP2Location.
+	errUnknownTypeFmt = "%w for type %s"
+	newRequestErrFmt  = "new request: %w"
+	doRequestErrFmt   = "do request: %w"
 )
 
 var (
@@ -85,6 +104,7 @@ var (
 	errNoDBIPUrl        = errors.New("no DB-IP url")
 
 	errIP2LocationEntryNotFound = errors.New("no .mmdb entry found in IP2Location zip")
+	errNoIP2LocationCode        = errors.New("no IP2Location file code")
 )
 
 // New creates an Updater. It does not start any goroutines; call Start.
@@ -356,7 +376,7 @@ func (u *Updater) downloadDBIP(ctx context.Context, dbType db.Type, filename db.
 	for _, when := range []time.Time{now, now.AddDate(0, -1, 0)} {
 		url, ok := u.dbipURL(dbType, when)
 		if !ok {
-			return false, fmt.Errorf("%w for type %s", errNoDBIPUrl, dbType)
+			return false, fmt.Errorf(errUnknownTypeFmt, errNoDBIPUrl, dbType)
 		}
 
 		updated, found, err := u.fetchDBIP(ctx, filename, url)
@@ -372,6 +392,88 @@ func (u *Updater) downloadDBIP(ctx context.Context, dbType db.Type, filename db.
 	return false, errDBIPNotPublished
 }
 
+func (e *tokenRedactedError) Error() string {
+	return strings.ReplaceAll(e.err.Error(), e.token, "REDACTED")
+}
+
+func (e *tokenRedactedError) Unwrap() error { return e.err }
+
+// redactToken wraps err so its token-bearing message is scrubbed, if there is
+// a non-empty token to scrub.
+func redactToken(err error, token string) error {
+	if err == nil || token == "" {
+		return err
+	}
+
+	return &tokenRedactedError{err: err, token: token}
+}
+
+// downloadIP2Location fetches an IP2Location LITE edition from its fixed
+// download URL. The request is conditional (If-Modified-Since against the
+// existing file's mtime — this survives the endpoint's redirect to its
+// backing object storage, confirmed against a live account during design).
+// On change, the response is a zip archive; extractMMDB pulls the .mmdb entry
+// out before the atomic write.
+func (u *Updater) downloadIP2Location(ctx context.Context, dbType db.Type, filename db.Filename) (bool, error) {
+	code, ok := ip2locationFileCode(dbType)
+	if !ok {
+		return false, fmt.Errorf(errUnknownTypeFmt, errNoIP2LocationCode, dbType)
+	}
+
+	url := fmt.Sprintf("%s?token=%s&file=%s", u.ip2locationURL, u.ip2locationToken, code)
+
+	dctx, cancel := context.WithTimeout(ctx, u.timeout)
+	defer cancel()
+
+	// http.NewRequestWithContext and httpClient.Do below can both return a
+	// *url.Error whose Error() embeds the full request URL (token included) —
+	// e.g. on a malformed URL, a dial failure, or context cancellation.
+	// redactToken scrubs the token from those before they're wrapped.
+	req, err := http.NewRequestWithContext(dctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return false, fmt.Errorf(newRequestErrFmt, redactToken(err, u.ip2locationToken))
+	}
+
+	if info, statErr := os.Stat(filepath.Join(u.dbPath, string(filename))); statErr == nil {
+		req.Header.Set("If-Modified-Since", info.ModTime().UTC().Format(http.TimeFormat))
+	}
+
+	resp, err := u.httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf(doRequestErrFmt, redactToken(err, u.ip2locationToken))
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusNotModified:
+		return false, nil
+
+	case http.StatusOK:
+		// proceed below
+	default:
+		// Never include `url` here — it carries the token. `code` identifies
+		// the database without leaking the credential into logs.
+		return false, fmt.Errorf("%w %s for IP2Location file %s", errUnexpectedStatus, resp.Status, code)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("read body: %w", err)
+	}
+
+	mmdb, err := extractMMDB(data)
+	if err != nil {
+		return false, fmt.Errorf("extract: %w", err)
+	}
+	defer mmdb.Close()
+
+	if err = u.writeAtomic(filename, mmdb); err != nil {
+		return false, fmt.Errorf("write: %w", err)
+	}
+
+	return true, nil
+}
+
 // fetchDBIP performs one conditional GET. found is false on 404, so the caller
 // can fall back to another month; on 304 it is true with updated=false.
 func (u *Updater) fetchDBIP(
@@ -384,7 +486,7 @@ func (u *Updater) fetchDBIP(
 
 	req, err := http.NewRequestWithContext(dctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
-		return false, false, fmt.Errorf("new request: %w", err)
+		return false, false, fmt.Errorf(newRequestErrFmt, err)
 	}
 
 	if info, statErr := os.Stat(filepath.Join(u.dbPath, string(filename))); statErr == nil {
@@ -393,7 +495,7 @@ func (u *Updater) fetchDBIP(
 
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
-		return false, false, fmt.Errorf("do request: %w", err)
+		return false, false, fmt.Errorf(doRequestErrFmt, err)
 	}
 	defer resp.Body.Close()
 
