@@ -67,6 +67,14 @@ func TestNewDefaultsAndCredentials(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotNilf(t, u2.maxmind, "expected MaxMind client with credentials")
+
+	// IP2Location token is stored as-is (no client object built, unlike MaxMind).
+	u3, err := New(zaptest.NewLogger(t), Config{
+		DBPath: dir, DBInfoFn: nopInfo,
+		IP2LocationToken: "ip2loc-token",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "ip2loc-token", u3.ip2locationToken)
 }
 
 // TestNonPositiveDefaulted ensures a negative frequency/timeout is defaulted
@@ -386,4 +394,23 @@ func TestDownloadDBIPContextCanceled(t *testing.T) {
 	_, err := u.downloadDBIP(ctx, db.DBIPCityType, db.DBIPCity)
 	require.Error(t, err)
 	assert.ErrorIsf(t, err, context.Canceled, "a cancelled context must abort the download")
+}
+
+func TestIP2LocationFileCode(t *testing.T) {
+	t.Parallel()
+
+	code, ok := ip2locationFileCode(db.IP2LocationCountryType)
+	require.Truef(t, ok, "expected a file code for IP2Location country")
+	assert.Equal(t, "DB1LITEMMDB", code)
+
+	code, ok = ip2locationFileCode(db.IP2LocationCityType)
+	require.Truef(t, ok, "expected a file code for IP2Location city")
+	assert.Equal(t, "DB11LITEMMDB", code)
+
+	code, ok = ip2locationFileCode(db.IP2LocationASNType)
+	require.Truef(t, ok, "expected a file code for IP2Location ASN")
+	assert.Equal(t, "DBASNLITEMMDB", code)
+
+	_, ok = ip2locationFileCode(db.GeoIP2CityType)
+	assert.Falsef(t, ok, "non-IP2Location type should not yield a file code")
 }

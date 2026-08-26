@@ -28,27 +28,30 @@ type (
 	// Config configures the Updater. MaxMind credentials are optional: if absent,
 	// only DB-IP databases are updated.
 	Config struct {
-		DBInfoFn   func() map[db.Filename]string
-		DBPath     string
-		LicenseKey string
-		AccountID  int
-		Frequency  time.Duration
-		Timeout    time.Duration
+		DBInfoFn         func() map[db.Filename]string
+		DBPath           string
+		LicenseKey       string
+		IP2LocationToken string
+		AccountID        int
+		Frequency        time.Duration
+		Timeout          time.Duration
 	}
 
 	// Updater refreshes existing databases on a fixed interval.
 	Updater struct {
-		logger     *zap.Logger
-		maxmind    *client.Client
-		httpClient *http.Client
-		getDBInfo  func() map[db.Filename]string
-		cancel     context.CancelFunc
-		dbPath     string
-		baseURL    string
-		wg         sync.WaitGroup
-		frequency  time.Duration
-		timeout    time.Duration
-		closeOnce  sync.Once
+		logger           *zap.Logger
+		maxmind          *client.Client
+		httpClient       *http.Client
+		getDBInfo        func() map[db.Filename]string
+		cancel           context.CancelFunc
+		dbPath           string
+		baseURL          string
+		ip2locationURL   string //nolint:unused // used by Task 4 (download implementation)
+		ip2locationToken string
+		wg               sync.WaitGroup
+		frequency        time.Duration
+		timeout          time.Duration
+		closeOnce        sync.Once
 	}
 )
 
@@ -56,7 +59,8 @@ const (
 	defaultFrequency = 24 * time.Hour
 	defaultTimeout   = 30 * time.Second
 
-	dbipBaseURL = "https://download.db-ip.com/free/"
+	dbipBaseURL        = "https://download.db-ip.com/free/"
+	ip2locationBaseURL = "https://www.ip2location.com/download"
 
 	// tmpSuffix marks the in-progress temp files writeAtomic creates; it is also
 	// the matcher for the startup cleanup of crash-leftover temps.
@@ -108,13 +112,15 @@ func New(logger *zap.Logger, config Config) (*Updater, error) {
 	}
 
 	u := &Updater{
-		logger:     logger,
-		dbPath:     config.DBPath,
-		httpClient: &http.Client{},
-		frequency:  config.Frequency,
-		timeout:    config.Timeout,
-		getDBInfo:  config.DBInfoFn,
-		baseURL:    dbipBaseURL,
+		logger:           logger,
+		dbPath:           config.DBPath,
+		httpClient:       &http.Client{},
+		frequency:        config.Frequency,
+		timeout:          config.Timeout,
+		getDBInfo:        config.DBInfoFn,
+		baseURL:          dbipBaseURL,
+		ip2locationURL:   ip2locationBaseURL,
+		ip2locationToken: config.IP2LocationToken,
 	}
 
 	// Only build the MaxMind client when credentials are present; DB-IP needs none.
@@ -469,4 +475,21 @@ func (u *Updater) dbipURL(dbType db.Type, t time.Time) (string, bool) {
 	}
 
 	return fmt.Sprintf("%s%s-%s.mmdb.gz", u.baseURL, slug, t.Format(yyyyMMFormat)), true
+}
+
+// ip2locationFileCode returns the IP2Location download file code for a type.
+func ip2locationFileCode(dbType db.Type) (string, bool) {
+	switch dbType {
+	case db.IP2LocationCountryType:
+		return "DB1LITEMMDB", true
+
+	case db.IP2LocationCityType:
+		return "DB11LITEMMDB", true
+
+	case db.IP2LocationASNType:
+		return "DBASNLITEMMDB", true
+
+	default:
+		return "", false
+	}
 }
