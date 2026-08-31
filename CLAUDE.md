@@ -12,7 +12,8 @@ Module path: `github.com/ubiuser/caddy-geo-ops` (Go 1.26).
 
 ## Requirements
 
-- Handle multiple mmdb databases: MaxMind GeoIP2 and GeoLite2, and DB-IP databases.
+- Handle multiple mmdb databases: MaxMind GeoIP2 and GeoLite2, DB-IP, and IP2Location
+  databases.
 - Manage automatic (periodic remote downloads) and manual (local file copies) updates,
   and hot-reload a database when its file changes.
 - Derive the client IP honoring configurable forwarding headers (`X-Forwarded-For`,
@@ -123,6 +124,11 @@ per edition means a new download or manual copy **overwrites** the previous file
 piling up dated versions. (The auto-updater already writes the canonical name, so this only
 affects manual copies; MaxMind's extracted filenames already match.)
 
+IP2Location's free LITE downloads are delivered as a zip archive (containing a license
+file, a README, and the `.mmdb` itself) and must be extracted and renamed to the canonical
+name (`ip2location-country.mmdb`, `ip2location-city.mmdb`, `ip2location-asn.mmdb`) if
+placed manually. The auto-updater already extracts and writes the canonical name.
+
 ## Auto-update
 
 The updater refreshes only databases **already present** in `db_path` — it never downloads
@@ -147,9 +153,17 @@ Per vendor:
 - **DB-IP** — hardcoded monthly URLs (DB-IP Lite is public, no auth); conditional via
   `If-Modified-Since`, gzip-decompressed. Falls back to the previous month if the current
   month isn't published yet (start-of-month gap); if neither exists it's a benign skip.
+- **IP2Location (LITE)** — hardcoded download endpoint
+  (`https://www.ip2location.com/download`); requires an operator-supplied **download
+  token**. Conditional via `If-Modified-Since` (confirmed to survive the endpoint's
+  redirect to its backing object storage). The response is a zip archive (license + README
+  + the `.mmdb`); the updater extracts the `.mmdb` entry before the atomic write — unlike
+  DB-IP's plain gzip stream, this needs the whole response buffered first (`archive/zip`
+  needs random access for the central directory).
 
-MaxMind credentials gate only MaxMind downloads; DB-IP updates regardless. Frequency and
-timeout are configurable (non-positive values are defaulted).
+MaxMind credentials gate only MaxMind downloads; DB-IP updates regardless of credentials;
+IP2Location updates only when `ip2location_token` is set. Frequency and timeout are
+configurable (non-positive values are defaulted).
 
 ## Caddyfile
 
@@ -159,12 +173,13 @@ App config is a global option; the handler is a directive; the matcher is a name
 {
     order geo_ops first
     geo_ops {
-        db_path          /var/lib/geoip
-        auto_update                       # optional
-        account_id       123456           # MaxMind, only with auto_update
-        license_key      xxxxxxxx         # MaxMind, only with auto_update
-        update_frequency 24h
-        update_timeout   30s
+        db_path           /var/lib/geoip
+        auto_update                        # optional
+        account_id        123456           # MaxMind, only with auto_update
+        license_key       xxxxxxxx         # MaxMind, only with auto_update
+        ip2location_token xxxxxxxx         # IP2Location, only with auto_update
+        update_frequency  24h
+        update_timeout    30s
     }
 }
 

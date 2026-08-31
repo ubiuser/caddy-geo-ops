@@ -11,12 +11,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A [Caddy](https://caddyserver.com) plugin for IP geolocation. It loads MaxMind **GeoIP2 /
-GeoLite2** and **DB-IP** `.mmdb` databases and gives you:
+GeoLite2**, **DB-IP**, and **IP2Location** `.mmdb` databases and gives you:
 
 - an **HTTP handler** that exposes every field of every loaded database as a request
   placeholder (`{geo.<db>.<field>}`),
 - an **HTTP matcher** for routing/allow/deny by geo data,
-- automatic, scheduled **database updates** (MaxMind and DB-IP) plus **hot-reload** when a
+- automatic, scheduled **database updates** (MaxMind, DB-IP, and IP2Location) plus
+  **hot-reload** when a
   database file changes on disk.
 
 All three share one set of in-memory databases, owned by a Caddy **app**.
@@ -33,6 +34,7 @@ All three share one set of in-memory databases, owned by a Caddy **app**.
 - [Getting databases](#getting-databases)
   - [MaxMind (GeoIP2 / GeoLite2)](#maxmind-geoip2--geolite2)
   - [DB-IP](#db-ip)
+  - [IP2Location](#ip2location)
   - [Supported editions & required filenames](#supported-editions--required-filenames)
 - [Configuration](#configuration)
   - [The `geo_ops` app (global options)](#the-geo_ops-app-global-options)
@@ -161,6 +163,36 @@ DB-IP "Lite" databases are free and need no account.
    instead of leaving stale dated files piling up. (Auto-update writes this canonical name
    for you; DB-IP needs **no credentials**.)
 
+### IP2Location
+
+IP2Location LITE databases are free but require a personal **download token** (register at
+<https://lite.ip2location.com/ip2location-lite>, then find your token in the account
+download area).
+
+1. Download the **MMDB** format of the editions you want — Country (DB1), City (DB11), or
+   ASN — either manually from the LITE site, or automate it:
+
+   ```sh
+   curl -L "https://www.ip2location.com/download?token=$TOKEN&file=DB11LITEMMDB" -o db11.zip
+   ```
+
+2. The download is a **zip archive** containing a license file, a README, and the `.mmdb`
+   itself (e.g. `IP2LOCATION-LITE-DB11.MMDB`). Extract it and rename to the plugin's
+   canonical filename:
+
+   ```sh
+   unzip -j db11.zip '*.MMDB' -d /var/lib/geoip
+   mv /var/lib/geoip/IP2LOCATION-LITE-DB11.MMDB /var/lib/geoip/ip2location-city.mmdb
+   ```
+
+   (Auto-update writes this canonical name for you — see
+   [Automatic updates](#automatic-updates).)
+
+> IP2Location LITE uses the same field schema as MaxMind's GeoIP2/GeoLite2 for these three
+> editions — `{geo.ip2location-city.*}` resolves the same field paths as
+> `{geo.geoip2-city.*}` (see [Field reference by edition](#field-reference-by-edition));
+> only the underlying geolocation data differs between vendors.
+
 ### Supported editions & required filenames
 
 Place files under exactly these names (matching is case-insensitive). Anything else is
@@ -181,6 +213,9 @@ ignored.
 | DB-IP City Lite | `dbip-city-lite.mmdb` | DB-IP (free) | no credentials |
 | DB-IP Country Lite | `dbip-country-lite.mmdb` | DB-IP (free) | no credentials |
 | DB-IP ASN Lite | `dbip-asn-lite.mmdb` | DB-IP (free) | no credentials |
+| IP2Location Country (DB1) | `ip2location-country.mmdb` | IP2Location LITE (free) | needs token |
+| IP2Location City (DB11) | `ip2location-city.mmdb` | IP2Location LITE (free) | needs token |
+| IP2Location ASN | `ip2location-asn.mmdb` | IP2Location LITE (free) | needs token |
 
 You can load several at once (e.g. a Country db plus an ASN db plus an Anonymous-IP db);
 each contributes its own placeholders.
@@ -197,12 +232,13 @@ Configure the shared app in the Caddyfile **global options** block:
 {
 	order geo_ops first
 	geo_ops {
-		db_path          /var/lib/geoip   # required: directory holding the *.mmdb files
-		auto_update                       # optional: enable scheduled downloads
-		account_id       123456           # MaxMind Account ID (only with auto_update)
-		license_key      {env.MAXMIND_KEY}  # MaxMind license key (only with auto_update)
-		update_frequency 24h              # how often to check (default 24h)
-		update_timeout   1m               # per-download timeout (default 30s)
+		db_path            /var/lib/geoip   # required: directory holding the *.mmdb files
+		auto_update                         # optional: enable scheduled downloads
+		account_id         123456           # MaxMind Account ID (only with auto_update)
+		license_key        {env.MAXMIND_KEY}   # MaxMind license key (only with auto_update)
+		ip2location_token  {env.IP2LOCATION_TOKEN}  # IP2Location download token (only with auto_update)
+		update_frequency   24h              # how often to check (default 24h)
+		update_timeout     1m               # per-download timeout (default 30s)
 	}
 }
 ```
@@ -213,10 +249,11 @@ Configure the shared app in the Caddyfile **global options** block:
 | `auto_update` | Enable periodic remote updates of databases already present. | off |
 | `account_id` | MaxMind Account ID (integer). Required to update MaxMind editions. | — |
 | `license_key` | MaxMind license key. Required to update MaxMind editions. | — |
+| `ip2location_token` | IP2Location LITE download token. Required to update IP2Location editions. | — |
 | `update_frequency` | Interval between update checks. | `24h` |
 | `update_timeout` | Timeout for a single download. | `30s` |
 
-> Use `{env.VAR}` to keep the license key out of the Caddyfile.
+> Use `{env.VAR}` to keep the license key and IP2Location token out of the Caddyfile.
 
 ### Automatic updates
 
@@ -227,6 +264,8 @@ fresh — it never downloads editions you haven't seeded.
   `account_id` + `license_key`. Without credentials, MaxMind files are left untouched.
 - **DB-IP** editions are refreshed from DB-IP's public monthly URLs and need **no**
   credentials.
+- **IP2Location** LITE editions are refreshed from IP2Location's download endpoint and
+  require `ip2location_token`. Without a token, IP2Location files are left untouched.
 - On startup, a database whose file is already older than `update_frequency` is refreshed
   immediately; fresh files are left alone (so reloading Caddy doesn't re-hit the vendors).
 - Updates are written atomically and **hot-reloaded** with no downtime. Manually replacing
@@ -290,7 +329,7 @@ These are the common fields per edition. Prefix each with `geo.<db>.` (and `name
 supports `en`, `de`, `es`, `fr`, `ja`, `pt-BR`, `ru`, `zh-CN`). Booleans render as the
 strings `"true"` / `"false"`.
 
-**City** (`geoip2-city`, `geolite2-city`, `dbip-city-lite`)
+**City** (`geoip2-city`, `geolite2-city`, `dbip-city-lite`, `ip2location-city`)
 
 ```
 continent.code                continent.names.en
@@ -303,7 +342,7 @@ location.accuracy_radius      location.metro_code
 postal.code
 ```
 
-**Country** (`geoip2-country`, `geolite2-country`, `dbip-country-lite`)
+**Country** (`geoip2-country`, `geolite2-country`, `dbip-country-lite`, `ip2location-country`)
 
 ```
 continent.code                continent.names.en
@@ -311,7 +350,7 @@ country.iso_code              country.names.en        country.is_in_european_uni
 registered_country.iso_code   represented_country.iso_code
 ```
 
-**ASN** (`geolite2-asn`, `dbip-asn-lite`)
+**ASN** (`geolite2-asn`, `dbip-asn-lite`, `ip2location-asn`)
 
 ```
 autonomous_system_number              autonomous_system_organization
@@ -672,6 +711,7 @@ example.com {
 		auto_update
 		account_id       123456
 		license_key      {env.MAXMIND_LICENSE_KEY}
+		ip2location_token {env.IP2LOCATION_TOKEN}
 		update_frequency 24h
 	}
 }
@@ -717,6 +757,7 @@ Sketch of the app block:
       "auto_update": true,
       "account_id": 123456,
       "license_key": "…",
+      "ip2location_token": "…",
       "update_frequency": "24h"
     }
   }
@@ -778,7 +819,8 @@ are personal data under regulations such as the GDPR and CCPA. What the module d
 
 - **It does not persist or cache it.** No per-request IP or lookup is written to disk or held
   in memory beyond the request; the only files written are the geo databases themselves.
-- **It does not transmit it.** The auto-updater only downloads databases from MaxMind / DB-IP;
+- **It does not transmit it.** The auto-updater only downloads databases from
+  MaxMind / DB-IP / IP2Location;
   client IPs and lookups never leave the process.
 - **Logs.** The client `ip` can appear in `warn`-level logs on a lookup error, and a geo value
   (`got`) in `debug` logs on a matcher non-match. Both are emitted as structured fields, so you
@@ -805,7 +847,9 @@ your deployment.
 
 **A database isn't being loaded.**
 - The filename must match the [taxonomy](#supported-editions--required-filenames) exactly
-  (case-insensitive). DB-IP files in particular must be renamed to drop the date suffix.
+  (case-insensitive). DB-IP files in particular must be renamed to drop the date suffix;
+  IP2Location files must be extracted from their download zip and renamed to the canonical
+  name.
 - Check Caddy's logs at startup for `database loaded` entries.
 
 **Wrong IP is being geolocated (always the proxy's IP).**
@@ -814,7 +858,8 @@ your deployment.
 
 **Auto-update isn't fetching MaxMind.**
 - MaxMind needs both `account_id` and `license_key`; with only one set, the configuration
-  is rejected at startup. DB-IP needs neither.
+  is rejected at startup. DB-IP needs no credentials. IP2Location needs a single
+  `ip2location_token`.
 - Auto-update only refreshes databases **already present** — seed the folder first.
 
 **Matcher never matches.**

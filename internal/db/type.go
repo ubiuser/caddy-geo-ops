@@ -21,9 +21,15 @@ const (
 	DBIPCityType    Type = "DBIP-City-Lite"
 	DBIPCountryType Type = "DBIP-Country-Lite"
 	DBIPASNType     Type = "DBIP-ASN-Lite"
+
+	IP2LocationCountryType Type = "IP2Location-Country"
+	IP2LocationCityType    Type = "IP2Location-City"
+	IP2LocationASNType     Type = "IP2Location-ASN"
 )
 
 // ToType converts a filename to a database type.
+//
+//nolint:cyclop // switch cases for all recognised database types (MaxMind/GeoLite2/DB-IP/IP2Location)
 func ToType(filename Filename) Type {
 	switch filename {
 	case GeoIP2AnonymousIP:
@@ -65,6 +71,15 @@ func ToType(filename Filename) Type {
 	case DBIPASN:
 		return DBIPASNType
 
+	case IP2LocationCountry:
+		return IP2LocationCountryType
+
+	case IP2LocationCity:
+		return IP2LocationCityType
+
+	case IP2LocationASN:
+		return IP2LocationASNType
+
 	default:
 		return UnknownType
 	}
@@ -96,6 +111,18 @@ func IsGeoIP2OrGeoLite2(t Type) bool {
 func IsDBIP(t Type) bool {
 	switch t {
 	case DBIPCityType, DBIPCountryType, DBIPASNType:
+		return true
+
+	default:
+		return false
+	}
+}
+
+// IsIP2Location reports whether a database type is an IP2Location LITE edition
+// (updatable via the hardcoded IP2Location download endpoint).
+func IsIP2Location(t Type) bool {
+	switch t {
+	case IP2LocationCountryType, IP2LocationCityType, IP2LocationASNType:
 		return true
 
 	default:

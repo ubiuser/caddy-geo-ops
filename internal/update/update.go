@@ -1,11 +1,15 @@
 // Package update periodically refreshes database files that already exist in
 // the db folder. MaxMind editions are fetched via the geoipupdate client
 // (Account ID + License Key); DB-IP Lite editions are fetched from hardcoded
-// public URLs. Downloads are written to a temp file and atomically renamed over
-// the target, which the dirmonitor then picks up and reloads.
+// public URLs; IP2Location LITE editions are fetched from IP2Location's
+// download endpoint using a download token. Downloads are written to a temp
+// file and atomically renamed over the target, which the dirmonitor then
+// picks up and reloads.
 package update
 
 import (
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -25,30 +29,49 @@ import (
 )
 
 type (
-	// Config configures the Updater. MaxMind credentials are optional: if absent,
-	// only DB-IP databases are updated.
+	// Config configures the Updater. Each vendor's credentials are independent
+	// and gate only that vendor's databases: MaxMind needs AccountID +
+	// LicenseKey, IP2Location needs IP2LocationToken, and DB-IP needs neither.
+	// A vendor whose credentials are absent has its databases skipped on every
+	// update pass; the others keep updating normally.
 	Config struct {
-		DBInfoFn   func() map[db.Filename]string
-		DBPath     string
-		LicenseKey string
-		AccountID  int
-		Frequency  time.Duration
-		Timeout    time.Duration
+		DBInfoFn         func() map[db.Filename]string
+		DBPath           string
+		LicenseKey       string
+		IP2LocationToken string
+		AccountID        int
+		Frequency        time.Duration
+		Timeout          time.Duration
 	}
 
 	// Updater refreshes existing databases on a fixed interval.
 	Updater struct {
-		logger     *zap.Logger
-		maxmind    *client.Client
-		httpClient *http.Client
-		getDBInfo  func() map[db.Filename]string
-		cancel     context.CancelFunc
-		dbPath     string
-		baseURL    string
-		wg         sync.WaitGroup
-		frequency  time.Duration
-		timeout    time.Duration
-		closeOnce  sync.Once
+		logger           *zap.Logger
+		maxmind          *client.Client
+		httpClient       *http.Client
+		getDBInfo        func() map[db.Filename]string
+		cancel           context.CancelFunc
+		dbPath           string
+		baseURL          string
+		ip2locationURL   string
+		ip2locationToken string
+		wg               sync.WaitGroup
+		frequency        time.Duration
+		timeout          time.Duration
+		closeOnce        sync.Once
+	}
+
+	// tokenRedactedError wraps an error whose formatted message may embed the
+	// IP2Location download token — notably *url.Error, which net/http returns
+	// from both http.NewRequestWithContext (a malformed URL) and http.Client.Do
+	// (dial/timeout/context-cancellation failures): its Error() renders the
+	// full request URL, query string and all. Error() scrubs the token from
+	// that rendered text; Unwrap() still exposes the original error so
+	// errors.Is/As (e.g. errors.Is(err, context.Canceled)) keep working
+	// through the wrapper.
+	tokenRedactedError struct {
+		err   error
+		token string
 	}
 )
 
@@ -56,13 +79,20 @@ const (
 	defaultFrequency = 24 * time.Hour
 	defaultTimeout   = 30 * time.Second
 
-	dbipBaseURL = "https://download.db-ip.com/free/"
+	dbipBaseURL        = "https://download.db-ip.com/free/"
+	ip2locationBaseURL = "https://www.ip2location.com/download"
 
 	// tmpSuffix marks the in-progress temp files writeAtomic creates; it is also
 	// the matcher for the startup cleanup of crash-leftover temps.
 	tmpSuffix = ".tmp-"
 
 	yyyyMMFormat = "2006-01"
+
+	// errUnknownTypeFmt wraps a "no download URL/code for this type" sentinel
+	// with the offending db.Type; shared by downloadDBIP and downloadIP2Location.
+	errUnknownTypeFmt = "%w for type %s"
+	newRequestErrFmt  = "new request: %w"
+	doRequestErrFmt   = "do request: %w"
 )
 
 var (
@@ -77,6 +107,9 @@ var (
 	// existing database keeps serving — so it is logged at debug, not error.
 	errDBIPNotPublished = errors.New("db-ip database not yet published")
 	errNoDBIPUrl        = errors.New("no DB-IP url")
+
+	errIP2LocationEntryNotFound = errors.New("no .mmdb entry found in IP2Location zip")
+	errNoIP2LocationCode        = errors.New("no IP2Location file code")
 )
 
 // New creates an Updater. It does not start any goroutines; call Start.
@@ -108,13 +141,15 @@ func New(logger *zap.Logger, config Config) (*Updater, error) {
 	}
 
 	u := &Updater{
-		logger:     logger,
-		dbPath:     config.DBPath,
-		httpClient: &http.Client{},
-		frequency:  config.Frequency,
-		timeout:    config.Timeout,
-		getDBInfo:  config.DBInfoFn,
-		baseURL:    dbipBaseURL,
+		logger:           logger,
+		dbPath:           config.DBPath,
+		httpClient:       &http.Client{},
+		frequency:        config.Frequency,
+		timeout:          config.Timeout,
+		getDBInfo:        config.DBInfoFn,
+		baseURL:          dbipBaseURL,
+		ip2locationURL:   ip2locationBaseURL,
+		ip2locationToken: config.IP2LocationToken,
 	}
 
 	// Only build the MaxMind client when credentials are present; DB-IP needs none.
@@ -144,6 +179,7 @@ func (u *Updater) Start() {
 		logfields.MaxmindEnabled(u.maxmind != nil),
 	)
 	u.warnIfMaxmindUnconfigured()
+	u.warnIfIP2LocationUnconfigured()
 
 	ticker := time.NewTicker(u.frequency)
 
@@ -192,6 +228,25 @@ func (u *Updater) warnIfMaxmindUnconfigured() {
 	for filename := range u.getDBInfo() {
 		if db.IsGeoIP2OrGeoLite2(db.ToType(filename)) {
 			u.logger.Warn("MaxMind databases present but no credentials configured; " +
+				"they will not be auto-updated")
+
+			return
+		}
+	}
+}
+
+// warnIfIP2LocationUnconfigured warns once at startup when IP2Location
+// databases are present but no token is configured, so the operator knows
+// those files will silently never be auto-updated (the per-cycle skip is only
+// logged at debug).
+func (u *Updater) warnIfIP2LocationUnconfigured() {
+	if u.ip2locationToken != "" {
+		return
+	}
+
+	for filename := range u.getDBInfo() {
+		if db.IsIP2Location(db.ToType(filename)) {
+			u.logger.Warn("IP2Location databases present but no token configured; " +
 				"they will not be auto-updated")
 
 			return
@@ -271,6 +326,17 @@ func (u *Updater) updateAll(ctx context.Context, initial bool) {
 
 		case db.IsDBIP(dbType):
 			u.run(filename, func() (bool, error) { return u.downloadDBIP(ctx, dbType, filename) })
+
+		case db.IsIP2Location(dbType):
+			if u.ip2locationToken == "" {
+				u.logger.Debug("skipping IP2Location database; no token configured",
+					logfields.Database(string(filename)),
+				)
+
+				continue
+			}
+
+			u.run(filename, func() (bool, error) { return u.downloadIP2Location(ctx, dbType, filename) })
 		}
 	}
 }
@@ -346,7 +412,7 @@ func (u *Updater) downloadDBIP(ctx context.Context, dbType db.Type, filename db.
 	for _, when := range []time.Time{now, now.AddDate(0, -1, 0)} {
 		url, ok := u.dbipURL(dbType, when)
 		if !ok {
-			return false, fmt.Errorf("%w for type %s", errNoDBIPUrl, dbType)
+			return false, fmt.Errorf(errUnknownTypeFmt, errNoDBIPUrl, dbType)
 		}
 
 		updated, found, err := u.fetchDBIP(ctx, filename, url)
@@ -362,6 +428,88 @@ func (u *Updater) downloadDBIP(ctx context.Context, dbType db.Type, filename db.
 	return false, errDBIPNotPublished
 }
 
+func (e *tokenRedactedError) Error() string {
+	return strings.ReplaceAll(e.err.Error(), e.token, "REDACTED")
+}
+
+func (e *tokenRedactedError) Unwrap() error { return e.err }
+
+// redactToken wraps err so its token-bearing message is scrubbed, if there is
+// a non-empty token to scrub.
+func redactToken(err error, token string) error {
+	if err == nil || token == "" {
+		return err
+	}
+
+	return &tokenRedactedError{err: err, token: token}
+}
+
+// downloadIP2Location fetches an IP2Location LITE edition from its fixed
+// download URL. The request is conditional (If-Modified-Since against the
+// existing file's mtime — this survives the endpoint's redirect to its
+// backing object storage, confirmed against a live account during design).
+// On change, the response is a zip archive; extractMMDB pulls the .mmdb entry
+// out before the atomic write.
+func (u *Updater) downloadIP2Location(ctx context.Context, dbType db.Type, filename db.Filename) (bool, error) {
+	code, ok := ip2locationFileCode(dbType)
+	if !ok {
+		return false, fmt.Errorf(errUnknownTypeFmt, errNoIP2LocationCode, dbType)
+	}
+
+	url := fmt.Sprintf("%s?token=%s&file=%s", u.ip2locationURL, u.ip2locationToken, code)
+
+	dctx, cancel := context.WithTimeout(ctx, u.timeout)
+	defer cancel()
+
+	// http.NewRequestWithContext and httpClient.Do below can both return a
+	// *url.Error whose Error() embeds the full request URL (token included) —
+	// e.g. on a malformed URL, a dial failure, or context cancellation.
+	// redactToken scrubs the token from those before they're wrapped.
+	req, err := http.NewRequestWithContext(dctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return false, fmt.Errorf(newRequestErrFmt, redactToken(err, u.ip2locationToken))
+	}
+
+	if info, statErr := os.Stat(filepath.Join(u.dbPath, string(filename))); statErr == nil {
+		req.Header.Set("If-Modified-Since", info.ModTime().UTC().Format(http.TimeFormat))
+	}
+
+	resp, err := u.httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf(doRequestErrFmt, redactToken(err, u.ip2locationToken))
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusNotModified:
+		return false, nil
+
+	case http.StatusOK:
+		// proceed below
+	default:
+		// Never include `url` here — it carries the token. `code` identifies
+		// the database without leaking the credential into logs.
+		return false, fmt.Errorf("%w %s for IP2Location file %s", errUnexpectedStatus, resp.Status, code)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("read body: %w", err)
+	}
+
+	mmdb, err := extractMMDB(data)
+	if err != nil {
+		return false, fmt.Errorf("extract: %w", err)
+	}
+	defer mmdb.Close()
+
+	if err = u.writeAtomic(filename, mmdb); err != nil {
+		return false, fmt.Errorf("write: %w", err)
+	}
+
+	return true, nil
+}
+
 // fetchDBIP performs one conditional GET. found is false on 404, so the caller
 // can fall back to another month; on 304 it is true with updated=false.
 func (u *Updater) fetchDBIP(
@@ -374,7 +522,7 @@ func (u *Updater) fetchDBIP(
 
 	req, err := http.NewRequestWithContext(dctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
-		return false, false, fmt.Errorf("new request: %w", err)
+		return false, false, fmt.Errorf(newRequestErrFmt, err)
 	}
 
 	if info, statErr := os.Stat(filepath.Join(u.dbPath, string(filename))); statErr == nil {
@@ -383,7 +531,7 @@ func (u *Updater) fetchDBIP(
 
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
-		return false, false, fmt.Errorf("do request: %w", err)
+		return false, false, fmt.Errorf(doRequestErrFmt, err)
 	}
 	defer resp.Body.Close()
 
@@ -450,6 +598,33 @@ func (u *Updater) writeAtomic(filename db.Filename, r io.Reader) error {
 	return nil
 }
 
+// extractMMDB locates the .mmdb entry inside an IP2Location download zip
+// (which also contains a license file and a README) and returns a reader over
+// its decompressed contents. zip.NewReader needs random access for the
+// central directory, so the whole archive must already be in memory — unlike
+// DB-IP's plain gzip stream, this can't be handled as a single io.Reader pipe.
+func extractMMDB(data []byte) (io.ReadCloser, error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("open zip: %w", err)
+	}
+
+	for _, f := range zr.File {
+		if !strings.HasSuffix(strings.ToLower(f.Name), ".mmdb") {
+			continue
+		}
+
+		rc, openErr := f.Open()
+		if openErr != nil {
+			return nil, fmt.Errorf("open zip entry %s: %w", f.Name, openErr)
+		}
+
+		return rc, nil
+	}
+
+	return nil, errIP2LocationEntryNotFound
+}
+
 // dbipURL returns the DB-IP Lite download URL for a type and month.
 func (u *Updater) dbipURL(dbType db.Type, t time.Time) (string, bool) {
 	var slug string
@@ -469,4 +644,21 @@ func (u *Updater) dbipURL(dbType db.Type, t time.Time) (string, bool) {
 	}
 
 	return fmt.Sprintf("%s%s-%s.mmdb.gz", u.baseURL, slug, t.Format(yyyyMMFormat)), true
+}
+
+// ip2locationFileCode returns the IP2Location download file code for a type.
+func ip2locationFileCode(dbType db.Type) (string, bool) {
+	switch dbType {
+	case db.IP2LocationCountryType:
+		return "DB1LITEMMDB", true
+
+	case db.IP2LocationCityType:
+		return "DB11LITEMMDB", true
+
+	case db.IP2LocationASNType:
+		return "DBASNLITEMMDB", true
+
+	default:
+		return "", false
+	}
 }
