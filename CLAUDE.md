@@ -32,7 +32,7 @@ app/        geo_ops                 Caddy app — owns Ops; lifecycle Provision/
        ├─ internal/db               Filename ⇄ Type taxonomy across GeoIP2 / GeoLite2 / DB-IP
        ├─ internal/replacers        generic flatten of a decoded record into dotted-path placeholder keys
        ├─ internal/dirmonitor       fsnotify watcher with debounce → triggers reload
-       └─ internal/update           periodic updater (MaxMind via geoipupdate/v7; DB-IP via hardcoded URLs)
+       └─ internal/update           periodic updater (MaxMind via geoipupdate/v7; DB-IP and IP2Location/IP2Proxy via hardcoded URLs)
 handler/    http.handlers.geo_ops   middleware that sets {geo.*} placeholders on the request
   └─ internal/clientip              client IP from Caddy core's resolved value
 matcher/    http.matchers.geo_ops   request matcher over geo fields
@@ -124,11 +124,11 @@ per edition means a new download or manual copy **overwrites** the previous file
 piling up dated versions. (The auto-updater already writes the canonical name, so this only
 affects manual copies; MaxMind's extracted filenames already match.)
 
-IP2Location's free LITE downloads are delivered as a zip archive (containing a license
-file, a README, and the `.mmdb` itself) and must be extracted and renamed to the canonical
-name (`ip2location-country.mmdb`, `ip2location-city.mmdb`, `ip2location-asn.mmdb`,
-`ip2proxy-px10.mmdb`, `ip2proxy-px10-lite.mmdb`) if
-placed manually. The auto-updater already extracts and writes the canonical name.
+IP2Location's and IP2Proxy's downloads (LITE and paid alike) are delivered as a zip archive
+(containing a license file, a README, and the `.mmdb` itself) and must be extracted and
+renamed to the canonical name (`ip2location-country.mmdb`, `ip2location-city.mmdb`,
+`ip2location-asn.mmdb`, `ip2proxy-px10.mmdb`, `ip2proxy-px10-lite.mmdb`) if placed manually.
+The auto-updater already extracts and writes the canonical name.
 
 ## Auto-update
 

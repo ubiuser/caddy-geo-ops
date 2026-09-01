@@ -516,6 +516,7 @@ func newIP2LocationUpdater(t *testing.T, baseURL, token string) *Updater {
 	t.Helper()
 
 	return &Updater{
+		logger:                  zaptest.NewLogger(t),
 		dbPath:                  t.TempDir(),
 		httpClient:              &http.Client{},
 		timeout:                 5 * time.Second,

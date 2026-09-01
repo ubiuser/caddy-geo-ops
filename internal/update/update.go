@@ -1,10 +1,10 @@
 // Package update periodically refreshes database files that already exist in
 // the db folder. MaxMind editions are fetched via the geoipupdate client
 // (Account ID + License Key); DB-IP Lite editions are fetched from hardcoded
-// public URLs; IP2Location LITE editions are fetched from IP2Location's
-// download endpoint using a download token. Downloads are written to a temp
-// file and atomically renamed over the target, which the dirmonitor then
-// picks up and reloads.
+// public URLs; IP2Location LITE editions and IP2Proxy PX10 (paid or LITE) are
+// fetched from IP2Location's download endpoint using a download token.
+// Downloads are written to a temp file and atomically renamed over the
+// target, which the dirmonitor then picks up and reloads.
 package update
 
 import (
@@ -527,6 +527,12 @@ func (u *Updater) downloadIP2Location(ctx context.Context, dbType db.Type, filen
 	var mmdb io.ReadCloser
 
 	if shouldExtractInMemory(resp.ContentLength, u.downloadMemoryThreshold) {
+		u.logger.Debug("extracting IP2Location download",
+			logfields.Database(string(filename)),
+			logfields.ContentLength(resp.ContentLength),
+			logfields.ExtractionPath("memory"),
+		)
+
 		var data []byte
 
 		data, err = io.ReadAll(resp.Body)
@@ -536,6 +542,12 @@ func (u *Updater) downloadIP2Location(ctx context.Context, dbType db.Type, filen
 
 		mmdb, err = extractMMDB(data)
 	} else {
+		u.logger.Debug("extracting IP2Location download",
+			logfields.Database(string(filename)),
+			logfields.ContentLength(resp.ContentLength),
+			logfields.ExtractionPath("disk"),
+		)
+
 		mmdb, err = extractMMDBToFile(u.dbPath, filename, resp.Body)
 	}
 

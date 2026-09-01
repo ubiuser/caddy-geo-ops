@@ -207,7 +207,7 @@ above — no separate credential. Two editions exist:
 ```sh
 curl -L "https://www.ip2location.com/download?token=$TOKEN&file=PX10MMDB" -o px10.zip
 unzip -j px10.zip '*.MMDB' -d /var/lib/geoip
-mv /var/lib/geoip/IP2PROXY-PX10.MMDB /var/lib/geoip/ip2proxy-px10.mmdb
+mv /var/lib/geoip/IP2PROXY-PX10*.MMDB /var/lib/geoip/ip2proxy-px10.mmdb
 ```
 
 (Use `file=PX10LITEMMDB` and rename to `ip2proxy-px10-lite.mmdb` for the free edition instead.
@@ -221,7 +221,9 @@ Auto-update writes the canonical name for you either way.)
 **PX10 is a large download (~549MB uncompressed).** The default `update_timeout` (30s) will not
 be enough to complete it — set something like `update_timeout 5m` (tuned to your connection)
 before enabling auto-update for PX10. See [`download_memory_threshold`](#configuration) for how
-large downloads are kept from spiking memory use.
+large downloads are kept from spiking memory use. It also needs roughly 1.2GB of free space in
+`db_path` during the update (the download's temp zip plus the atomic-write temp, alongside the
+existing file).
 
 ### Supported editions & required filenames
 
@@ -282,7 +284,7 @@ Configure the shared app in the Caddyfile **global options** block:
 | `auto_update` | Enable periodic remote updates of databases already present. | off |
 | `account_id` | MaxMind Account ID (integer). Required to update MaxMind editions. | — |
 | `license_key` | MaxMind license key. Required to update MaxMind editions. | — |
-| `ip2location_token` | IP2Location LITE download token. Required to update IP2Location editions. | — |
+| `ip2location_token` | IP2Location download token (also used for IP2Proxy PX10). Required to update IP2Location/IP2Proxy editions. | — |
 | `download_memory_threshold` | Below this size (bytes), a downloaded zip is read fully into memory before extraction; at or above it, extraction streams to a temp file instead. | `104857600` (100 MiB) |
 | `update_frequency` | Interval between update checks. | `24h` |
 | `update_timeout` | Timeout for a single download. | `30s` |
