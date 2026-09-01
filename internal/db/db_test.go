@@ -14,6 +14,7 @@ func TestKey(t *testing.T) {
 	assert.Equal(t, "geoip2-anonymous-ip", db.GeoIP2AnonymousIP.Key())
 	assert.Equal(t, "dbip-city-lite", db.DBIPCity.Key())
 	assert.Equal(t, "ip2location-city", db.IP2LocationCity.Key())
+	assert.Equal(t, "ip2proxy-px10", db.IP2ProxyPX10.Key())
 }
 
 func TestToFilename(t *testing.T) {
@@ -54,6 +55,8 @@ func TestToTypeMappings(t *testing.T) {
 		{db.IP2LocationCountry, db.IP2LocationCountryType, "IP2Location-Country", false, false, true},
 		{db.IP2LocationCity, db.IP2LocationCityType, "IP2Location-City", false, false, true},
 		{db.IP2LocationASN, db.IP2LocationASNType, "IP2Location-ASN", false, false, true},
+		{db.IP2ProxyPX10, db.IP2ProxyPX10Type, "IP2Proxy-PX10", false, false, true},
+		{db.IP2ProxyPX10Lite, db.IP2ProxyPX10LiteType, "IP2Proxy-PX10-LITE", false, false, true},
 	}
 
 	for _, tc := range cases {
