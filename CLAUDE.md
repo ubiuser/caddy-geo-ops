@@ -126,7 +126,8 @@ affects manual copies; MaxMind's extracted filenames already match.)
 
 IP2Location's free LITE downloads are delivered as a zip archive (containing a license
 file, a README, and the `.mmdb` itself) and must be extracted and renamed to the canonical
-name (`ip2location-country.mmdb`, `ip2location-city.mmdb`, `ip2location-asn.mmdb`) if
+name (`ip2location-country.mmdb`, `ip2location-city.mmdb`, `ip2location-asn.mmdb`,
+`ip2proxy-px10.mmdb`, `ip2proxy-px10-lite.mmdb`) if
 placed manually. The auto-updater already extracts and writes the canonical name.
 
 ## Auto-update
@@ -153,13 +154,16 @@ Per vendor:
 - **DB-IP** — hardcoded monthly URLs (DB-IP Lite is public, no auth); conditional via
   `If-Modified-Since`, gzip-decompressed. Falls back to the previous month if the current
   month isn't published yet (start-of-month gap); if neither exists it's a benign skip.
-- **IP2Location (LITE)** — hardcoded download endpoint
+- **IP2Location (LITE + IP2Proxy PX10)** — hardcoded download endpoint
   (`https://www.ip2location.com/download`); requires an operator-supplied **download
-  token**. Conditional via `If-Modified-Since` (confirmed to survive the endpoint's
-  redirect to its backing object storage). The response is a zip archive (license + README
-  + the `.mmdb`); the updater extracts the `.mmdb` entry before the atomic write — unlike
-  DB-IP's plain gzip stream, this needs the whole response buffered first (`archive/zip`
-  needs random access for the central directory).
+  token** (shared across all IP2Location/IP2Proxy editions). Conditional via
+  `If-Modified-Since` (confirmed to survive the endpoint's redirect to its backing object
+  storage). The response is a zip archive (license + README + the `.mmdb`); the updater
+  extracts the `.mmdb` entry before the atomic write. Below `download_memory_threshold`
+  (default 100 MiB), extraction reads the whole zip into memory (`archive/zip` needs random
+  access for the central directory, so this can't be a single `io.Reader` pipe like DB-IP's
+  plain gzip); at or above it — or when the download's size is unknown — extraction streams
+  to a temp file first, so a large edition like PX10 (~549MB uncompressed) can't spike memory.
 
 MaxMind credentials gate only MaxMind downloads; DB-IP updates regardless of credentials;
 IP2Location updates only when `ip2location_token` is set. Frequency and timeout are
@@ -178,6 +182,7 @@ App config is a global option; the handler is a directive; the matcher is a name
         account_id        123456           # MaxMind, only with auto_update
         license_key       xxxxxxxx         # MaxMind, only with auto_update
         ip2location_token xxxxxxxx         # IP2Location, only with auto_update
+        download_memory_threshold 104857600  # bytes, default shown; large zip downloads stream to disk above this
         update_frequency  24h
         update_timeout    30s
     }
