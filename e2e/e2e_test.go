@@ -41,7 +41,8 @@ const (
 			}
 			respond @gb "matched country={geo.geoip2-city.country.iso_code} city={geo.geoip2-city.city.names.en}"
 
-			respond "nomatch country=[{geo.geoip2-city.country.iso_code}] missing=[{geo.geoip2-city.no.such.field}]"
+			respond "nomatch country=[{geo.geoip2-city.country.iso_code}] missing=[{geo.geoip2-city.no.such.field}] ` +
+		`proxy=[{geo.ip2proxy-px10.is_public_proxy}]"
 		}
 	`
 )
@@ -72,5 +73,12 @@ func TestEndToEnd(t *testing.T) {
 	// resolve to empty (never a literal {geo...} placeholder).
 	//nolint:bodyclose // false alert, body is closed in tester.AssertResponse
 	tester.AssertResponse(request(t, "10.0.0.1"), http.StatusOK,
-		"nomatch country=[] missing=[]")
+		"nomatch country=[] missing=[] proxy=[]")
+
+	// A known IP2Proxy PX10 sample entry: is_public_proxy resolves through the
+	// same generic decode path as the GeoIP2 fixtures above — no new decode
+	// logic was needed for PX10, this proves it end-to-end.
+	//nolint:bodyclose // false alert, body is closed in tester.AssertResponse
+	tester.AssertResponse(request(t, "1.92.139.146"), http.StatusOK,
+		"nomatch country=[] missing=[] proxy=[true]")
 }
