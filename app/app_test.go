@@ -90,13 +90,14 @@ func TestUnmarshalCaddyfile(t *testing.T) {
 
 	d := caddyfile.NewTestDispenser(`
 		geo_ops {
-			db_path            /var/lib/geoip
+			db_path                   /var/lib/geoip
 			auto_update
-			account_id         12345
-			license_key        secret-key
-			ip2location_token  ip2loc-secret
-			update_frequency   12h
-			update_timeout     20s
+			account_id                12345
+			license_key               secret-key
+			ip2location_token         ip2loc-secret
+			download_memory_threshold 1048576
+			update_frequency          12h
+			update_timeout            20s
 		}
 	`)
 
@@ -108,6 +109,7 @@ func TestUnmarshalCaddyfile(t *testing.T) {
 	assert.Equal(t, 12345, a.AccountID)
 	assert.Equal(t, "secret-key", a.LicenseKey)
 	assert.Equal(t, "ip2loc-secret", a.IP2LocationToken)
+	assert.Equal(t, int64(1048576), a.DownloadMemoryThreshold)
 	assert.Equal(t, 12*time.Hour, time.Duration(a.UpdateFrequency))
 	assert.Equal(t, 20*time.Second, time.Duration(a.UpdateTimeout))
 }
@@ -116,8 +118,9 @@ func TestUnmarshalCaddyfileErrors(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"unknown option":  `geo_ops { bogus value }`,
-		"auto_update arg": `geo_ops { auto_update yes }`,
+		"unknown option":                `geo_ops { bogus value }`,
+		"auto_update arg":               `geo_ops { auto_update yes }`,
+		"bad download_memory_threshold": `geo_ops { download_memory_threshold notanumber }`,
 		// Missing arg must be on its own line: on a single line NextArg would
 		// otherwise consume the closing "}" as the value.
 		"db_path missing arg": "geo_ops {\n\tdb_path\n}",
