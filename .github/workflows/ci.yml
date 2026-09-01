@@ -13,7 +13,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # e2e's go.mod replaces the root module with a local path. A dependabot PR that
+  # only bumps the root module's go.mod/go.sum (its own separate "/" gomod target)
+  # can leave e2e/go.sum stale relative to what that bumped root module now needs
+  # — e2e's own "/e2e" gomod target never touches it. Self-heal: tidy both modules
+  # and push a fix commit before test/lint run, so a Dependabot PR goes green
+  # without a manual `go mod tidy` + push. Runs only for Dependabot PRs — the
+  # actor this repo already trusts with write access (see dependabot-auto-merge.yml).
+  tidy:
+    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push a fix commit to the PR branch
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: go mod tidy (root)
+        run: go mod tidy
+
+      - name: go mod tidy (e2e)
+        working-directory: e2e
+        run: go mod tidy
+
+      - name: Commit and push if go.mod/go.sum changed
+        run: |
+          if git diff --quiet -- go.mod go.sum e2e/go.mod e2e/go.sum; then
+            echo "go.mod/go.sum already tidy; nothing to push"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add go.mod go.sum e2e/go.mod e2e/go.sum
+          git commit -m "chore: go mod tidy"
+          git push origin HEAD:"${{ github.head_ref }}"
+
   test:
+    # Runs after tidy so a fix it pushed is picked up below (via the ref: on
+    # Check out). A skipped tidy (the common, non-Dependabot case) is not a
+    # failure — only a failed tidy should block the matrix.
+    needs: [tidy]
+    if: always() && needs.tidy.result != 'failure'
     # Cross-OS + Go-version matrix. The module floor is Go 1.26 (the code uses the
     # 1.26 new(expr) form), so the version axis is "go.mod floor" + "stable" rather
     # than older releases that wouldn't compile. Windows/macOS catch path- and
@@ -35,6 +83,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+          # Pick up tidy's fix commit on a Dependabot PR (its result is only
+          # "success" when it actually ran, i.e. actor == dependabot[bot]);
+          # every other run keeps the default ref (PR merge commit / branch).
+          ref: ${{ needs.tidy.result == 'success' && github.head_ref || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -82,6 +134,10 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
+    # See test's needs/if above: wait for tidy so a Dependabot fix commit lands
+    # before lint runs against e2e's go.sum; a skipped tidy does not block lint.
+    needs: [tidy]
+    if: always() && needs.tidy.result != 'failure'
     runs-on: ubuntu-latest
     # Hard gate: lint failures fail CI. The tree is clean under .golangci.yml's
     # `default: all`; keep it that way (run `golangci-lint run` locally before
@@ -97,6 +153,8 @@ jobs:
       # No submodule needed: golangci-lint only lints the target module, and the
       # MaxMind-DB submodule is a separate module it does not descend into.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.tidy.result == 'success' && github.head_ref || github.ref }}
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
