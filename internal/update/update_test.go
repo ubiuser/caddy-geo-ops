@@ -98,6 +98,27 @@ func TestNonPositiveDefaulted(t *testing.T) {
 	u.Stop()
 }
 
+func TestNewDownloadMemoryThresholdDefault(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Unset -> defaulted.
+	u, err := New(zaptest.NewLogger(t), Config{DBPath: dir, DBInfoFn: nopInfo})
+	require.NoError(t, err)
+	assert.Equal(t, int64(defaultDownloadMemoryThreshold), u.downloadMemoryThreshold)
+
+	// Non-positive -> also defaulted (same rule as Frequency/Timeout).
+	u2, err := New(zaptest.NewLogger(t), Config{DBPath: dir, DBInfoFn: nopInfo, DownloadMemoryThreshold: -1})
+	require.NoError(t, err)
+	assert.Equal(t, int64(defaultDownloadMemoryThreshold), u2.downloadMemoryThreshold)
+
+	// Explicit positive value -> stored as-is.
+	u3, err := New(zaptest.NewLogger(t), Config{DBPath: dir, DBInfoFn: nopInfo, DownloadMemoryThreshold: 1024})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1024), u3.downloadMemoryThreshold)
+}
+
 func TestStopIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -413,6 +434,14 @@ func TestIP2LocationFileCode(t *testing.T) {
 	code, ok = ip2locationFileCode(db.IP2LocationASNType)
 	require.Truef(t, ok, "expected a file code for IP2Location ASN")
 	assert.Equal(t, "DBASNLITEMMDB", code)
+
+	code, ok = ip2locationFileCode(db.IP2ProxyPX10Type)
+	require.Truef(t, ok, "expected a file code for IP2Proxy PX10")
+	assert.Equal(t, "PX10MMDB", code)
+
+	code, ok = ip2locationFileCode(db.IP2ProxyPX10LiteType)
+	require.Truef(t, ok, "expected a file code for IP2Proxy PX10 LITE")
+	assert.Equal(t, "PX10LITEMMDB", code)
 
 	_, ok = ip2locationFileCode(db.GeoIP2CityType)
 	assert.Falsef(t, ok, "non-IP2Location type should not yield a file code")

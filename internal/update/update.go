@@ -35,30 +35,32 @@ type (
 	// A vendor whose credentials are absent has its databases skipped on every
 	// update pass; the others keep updating normally.
 	Config struct {
-		DBInfoFn         func() map[db.Filename]string
-		DBPath           string
-		LicenseKey       string
-		IP2LocationToken string
-		AccountID        int
-		Frequency        time.Duration
-		Timeout          time.Duration
+		DBInfoFn                func() map[db.Filename]string
+		DBPath                  string
+		LicenseKey              string
+		IP2LocationToken        string
+		AccountID               int
+		Frequency               time.Duration
+		Timeout                 time.Duration
+		DownloadMemoryThreshold int64
 	}
 
 	// Updater refreshes existing databases on a fixed interval.
 	Updater struct {
-		logger           *zap.Logger
-		maxmind          *client.Client
-		httpClient       *http.Client
-		getDBInfo        func() map[db.Filename]string
-		cancel           context.CancelFunc
-		dbPath           string
-		baseURL          string
-		ip2locationURL   string
-		ip2locationToken string
-		wg               sync.WaitGroup
-		frequency        time.Duration
-		timeout          time.Duration
-		closeOnce        sync.Once
+		logger                  *zap.Logger
+		maxmind                 *client.Client
+		httpClient              *http.Client
+		getDBInfo               func() map[db.Filename]string
+		cancel                  context.CancelFunc
+		dbPath                  string
+		baseURL                 string
+		ip2locationURL          string
+		ip2locationToken        string
+		wg                      sync.WaitGroup
+		frequency               time.Duration
+		timeout                 time.Duration
+		downloadMemoryThreshold int64
+		closeOnce               sync.Once
 	}
 
 	// tokenRedactedError wraps an error whose formatted message may embed the
@@ -78,6 +80,13 @@ type (
 const (
 	defaultFrequency = 24 * time.Hour
 	defaultTimeout   = 30 * time.Second
+
+	// defaultDownloadMemoryThreshold: below this, a zip download is read fully
+	// into memory before extraction (today's behaviour); at or above it, extraction
+	// streams to a temp file instead — see extractMMDBToFile. 100 MiB gives
+	// comfortable headroom above the largest LITE compressed download (~41MB for
+	// City) while staying well below IP2Proxy PX10's scale (~549MB uncompressed).
+	defaultDownloadMemoryThreshold = 100 * 1024 * 1024
 
 	dbipBaseURL        = "https://download.db-ip.com/free/"
 	ip2locationBaseURL = "https://www.ip2location.com/download"
@@ -140,16 +149,21 @@ func New(logger *zap.Logger, config Config) (*Updater, error) {
 		config.Timeout = defaultTimeout
 	}
 
+	if config.DownloadMemoryThreshold <= 0 {
+		config.DownloadMemoryThreshold = defaultDownloadMemoryThreshold
+	}
+
 	u := &Updater{
-		logger:           logger,
-		dbPath:           config.DBPath,
-		httpClient:       &http.Client{},
-		frequency:        config.Frequency,
-		timeout:          config.Timeout,
-		getDBInfo:        config.DBInfoFn,
-		baseURL:          dbipBaseURL,
-		ip2locationURL:   ip2locationBaseURL,
-		ip2locationToken: config.IP2LocationToken,
+		logger:                  logger,
+		dbPath:                  config.DBPath,
+		httpClient:              &http.Client{},
+		frequency:               config.Frequency,
+		timeout:                 config.Timeout,
+		getDBInfo:               config.DBInfoFn,
+		baseURL:                 dbipBaseURL,
+		ip2locationURL:          ip2locationBaseURL,
+		ip2locationToken:        config.IP2LocationToken,
+		downloadMemoryThreshold: config.DownloadMemoryThreshold,
 	}
 
 	// Only build the MaxMind client when credentials are present; DB-IP needs none.
@@ -657,6 +671,12 @@ func ip2locationFileCode(dbType db.Type) (string, bool) {
 
 	case db.IP2LocationASNType:
 		return "DBASNLITEMMDB", true
+
+	case db.IP2ProxyPX10Type:
+		return "PX10MMDB", true
+
+	case db.IP2ProxyPX10LiteType:
+		return "PX10LITEMMDB", true
 
 	default:
 		return "", false
