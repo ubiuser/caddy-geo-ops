@@ -35,6 +35,7 @@ All three share one set of in-memory databases, owned by a Caddy **app**.
   - [MaxMind (GeoIP2 / GeoLite2)](#maxmind-geoip2--geolite2)
   - [DB-IP](#db-ip)
   - [IP2Location](#ip2location)
+  - [IP2Proxy PX10](#ip2proxy-px10)
   - [Supported editions & required filenames](#supported-editions--required-filenames)
 - [Configuration](#configuration)
   - [The `geo_ops` app (global options)](#the-geo_ops-app-global-options)
