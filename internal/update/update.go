@@ -75,6 +75,16 @@ type (
 		err   error
 		token string
 	}
+
+	// tempFileZipEntry wraps a zip entry's reader opened from a temp file on
+	// disk (see extractMMDBToFile). Close releases all three resources it owns —
+	// the entry reader, the open zip archive, and the temp file itself.
+	tempFileZipEntry struct {
+		io.ReadCloser
+
+		zip  *zip.ReadCloser
+		path string
+	}
 )
 
 const (
@@ -102,6 +112,11 @@ const (
 	errUnknownTypeFmt = "%w for type %s"
 	newRequestErrFmt  = "new request: %w"
 	doRequestErrFmt   = "do request: %w"
+
+	// Shared format strings for zip entry extraction errors.
+	openZipErrFmt      = "open zip: %w"
+	openZipEntryErrFmt = "open zip entry %s: %w"
+	mmdbSuffix         = ".mmdb"
 )
 
 var (
@@ -620,21 +635,92 @@ func (u *Updater) writeAtomic(filename db.Filename, r io.Reader) error {
 func extractMMDB(data []byte) (io.ReadCloser, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, fmt.Errorf("open zip: %w", err)
+		return nil, fmt.Errorf(openZipErrFmt, err)
 	}
 
 	for _, f := range zr.File {
-		if !strings.HasSuffix(strings.ToLower(f.Name), ".mmdb") {
+		if !strings.HasSuffix(strings.ToLower(f.Name), mmdbSuffix) {
 			continue
 		}
 
 		rc, openErr := f.Open()
 		if openErr != nil {
-			return nil, fmt.Errorf("open zip entry %s: %w", f.Name, openErr)
+			return nil, fmt.Errorf(openZipEntryErrFmt, f.Name, openErr)
 		}
 
 		return rc, nil
 	}
+
+	return nil, errIP2LocationEntryNotFound
+}
+
+func (t *tempFileZipEntry) Close() error {
+	entryErr := t.ReadCloser.Close()
+	zipErr := t.zip.Close()
+	removeErr := os.Remove(t.path)
+
+	return errors.Join(entryErr, zipErr, removeErr)
+}
+
+// extractMMDBToFile streams r into a temp file in dir, then extracts the
+// .mmdb entry from it as a zip archive read directly off disk via
+// archive/zip.OpenReader — unlike extractMMDB, this never holds the
+// compressed archive in memory, so a large download (e.g. IP2Proxy PX10,
+// ~549MB uncompressed) can't cause a corresponding memory spike. The temp
+// file is named with the same tmpSuffix marker writeAtomic's own temp files
+// use, so a crash mid-download is cleaned up by the existing
+// cleanStaleTemps — no separate cleanup mechanism is needed. The returned
+// ReadCloser owns the temp file's lifecycle; its Close closes the zip
+// archive before removing the file (the open handle must be closed first
+// for Remove to succeed on Windows).
+func extractMMDBToFile(dir string, filename db.Filename, r io.Reader) (io.ReadCloser, error) {
+	tmp, err := os.CreateTemp(dir, string(filename)+".zip"+tmpSuffix+"*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp zip: %w", err)
+	}
+
+	tmpName := tmp.Name()
+
+	if _, err = io.Copy(tmp, r); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+
+		return nil, fmt.Errorf("copy to temp zip: %w", err)
+	}
+
+	if err = tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+
+		return nil, fmt.Errorf("close temp zip: %w", err)
+	}
+
+	zr, err := zip.OpenReader(tmpName)
+	if err != nil {
+		_ = os.Remove(tmpName)
+
+		return nil, fmt.Errorf(openZipErrFmt, err)
+	}
+
+	for _, f := range zr.File {
+		if !strings.HasSuffix(strings.ToLower(f.Name), mmdbSuffix) {
+			continue
+		}
+
+		var rc io.ReadCloser
+
+		rc, err = f.Open()
+		if err != nil {
+			_ = zr.Close()
+			_ = os.Remove(tmpName)
+
+			return nil, fmt.Errorf(openZipEntryErrFmt, f.Name, err)
+		}
+
+		return &tempFileZipEntry{ReadCloser: rc, zip: zr, path: tmpName}, nil
+	}
+
+	_ = zr.Close()
+	_ = os.Remove(tmpName)
 
 	return nil, errIP2LocationEntryNotFound
 }

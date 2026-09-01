@@ -700,3 +700,63 @@ func TestUpdateAllIP2LocationGatedByToken(t *testing.T) {
 	u2.updateAll(t.Context(), false)
 	assert.NotZerof(t, hits.Load(), "token configured -> IP2Location databases must be checked")
 }
+
+func TestExtractMMDBToFile(t *testing.T) {
+	t.Parallel()
+
+	sample, err := os.ReadFile(filepath.Join("testdata", "ip2proxy-px10-sample.mmdb"))
+	require.NoError(t, err)
+
+	z := buildZip(t, map[string][]byte{
+		"LICENSE-CC-BY-SA-4.0.TXT": []byte("license"),
+		"README.TXT":               []byte("readme"),
+		"IP2PROXY-PX10.MMDB":       sample,
+	})
+
+	dir := t.TempDir()
+
+	rc, err := extractMMDBToFile(dir, db.IP2ProxyPX10, bytes.NewReader(z))
+	require.NoError(t, err)
+
+	got, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Equalf(t, sample, got, "extracted content must match the real sample byte-for-byte")
+
+	require.NoError(t, rc.Close())
+
+	// Close must remove the temp zip file — nothing should remain in dir.
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Emptyf(t, entries, "temp zip file must be removed after Close")
+}
+
+func TestExtractMMDBToFileNoEntry(t *testing.T) {
+	t.Parallel()
+
+	z := buildZip(t, map[string][]byte{
+		"LICENSE-CC-BY-SA-4.0.TXT": []byte("license"),
+	})
+
+	dir := t.TempDir()
+
+	_, err := extractMMDBToFile(dir, db.IP2ProxyPX10, bytes.NewReader(z))
+	assert.ErrorIsf(t, err, errIP2LocationEntryNotFound, "zip without a .mmdb entry")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Emptyf(t, entries, "temp zip file must be removed even on error")
+}
+
+func TestExtractMMDBToFileCorrupt(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	_, err := extractMMDBToFile(dir, db.IP2ProxyPX10, strings.NewReader("not a zip file"))
+	require.Error(t, err)
+	assert.NotErrorIsf(t, err, errIP2LocationEntryNotFound, "corrupt data is a different error")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Emptyf(t, entries, "temp zip file must be removed even on error")
+}
