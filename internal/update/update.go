@@ -473,12 +473,15 @@ func redactToken(err error, token string) error {
 	return &tokenRedactedError{err: err, token: token}
 }
 
-// downloadIP2Location fetches an IP2Location LITE edition from its fixed
-// download URL. The request is conditional (If-Modified-Since against the
-// existing file's mtime — this survives the endpoint's redirect to its
-// backing object storage, confirmed against a live account during design).
-// On change, the response is a zip archive; extractMMDB pulls the .mmdb entry
-// out before the atomic write.
+// downloadIP2Location fetches an IP2Location/IP2Proxy edition (LITE Country/
+// City/ASN, or PX10 paid/LITE) from its fixed download URL. The request is
+// conditional (If-Modified-Since against the existing file's mtime — this
+// survives the endpoint's redirect to its backing object storage, confirmed
+// against a live account during design). On change, the response is a zip
+// archive; extraction reads it from memory when the download is small, or
+// streams to a temp file when it's not (see shouldExtractInMemory) so a
+// large edition like PX10 (~549MB uncompressed) can't cause an unbounded
+// memory spike.
 func (u *Updater) downloadIP2Location(ctx context.Context, dbType db.Type, filename db.Filename) (bool, error) {
 	code, ok := ip2locationFileCode(dbType)
 	if !ok {
@@ -521,15 +524,25 @@ func (u *Updater) downloadIP2Location(ctx context.Context, dbType db.Type, filen
 		return false, fmt.Errorf("%w %s for IP2Location file %s", errUnexpectedStatus, resp.Status, code)
 	}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("read body: %w", err)
+	var mmdb io.ReadCloser
+
+	if shouldExtractInMemory(resp.ContentLength, u.downloadMemoryThreshold) {
+		var data []byte
+
+		data, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return false, fmt.Errorf("read body: %w", err)
+		}
+
+		mmdb, err = extractMMDB(data)
+	} else {
+		mmdb, err = extractMMDBToFile(u.dbPath, filename, resp.Body)
 	}
 
-	mmdb, err := extractMMDB(data)
 	if err != nil {
 		return false, fmt.Errorf("extract: %w", err)
 	}
+
 	defer mmdb.Close()
 
 	if err = u.writeAtomic(filename, mmdb); err != nil {
@@ -723,6 +736,15 @@ func extractMMDBToFile(dir string, filename db.Filename, r io.Reader) (io.ReadCl
 	_ = os.Remove(tmpName)
 
 	return nil, errIP2LocationEntryNotFound
+}
+
+// shouldExtractInMemory reports whether a zip download of the given size
+// should be read fully into memory before extraction (see extractMMDB),
+// versus streamed to a temp file (see extractMMDBToFile). A negative
+// contentLength means the server didn't report one (e.g. chunked transfer
+// encoding) — treated as "not known to be small" rather than assumed small.
+func shouldExtractInMemory(contentLength, threshold int64) bool {
+	return contentLength >= 0 && contentLength <= threshold
 }
 
 // dbipURL returns the DB-IP Lite download URL for a type and month.
