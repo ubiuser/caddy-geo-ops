@@ -24,15 +24,16 @@ type (
 	//
 	//nolint:tagliatelle // snake_case is the Caddyfile convention
 	App struct {
-		ops              *ops.Ops
-		logger           *zap.Logger
-		DBPath           string         `json:"db_path,omitempty"`
-		LicenseKey       string         `json:"license_key,omitempty"`
-		IP2LocationToken string         `json:"ip2location_token,omitempty"`
-		AccountID        int            `json:"account_id,omitempty"`
-		UpdateFrequency  caddy.Duration `json:"update_frequency,omitempty"`
-		UpdateTimeout    caddy.Duration `json:"update_timeout,omitempty"`
-		AutoUpdate       bool           `json:"auto_update,omitempty"`
+		ops                     *ops.Ops
+		logger                  *zap.Logger
+		DBPath                  string         `json:"db_path,omitempty"`
+		LicenseKey              string         `json:"license_key,omitempty"`
+		IP2LocationToken        string         `json:"ip2location_token,omitempty"`
+		DownloadMemoryThreshold int64          `json:"download_memory_threshold,omitempty"`
+		AccountID               int            `json:"account_id,omitempty"`
+		UpdateFrequency         caddy.Duration `json:"update_frequency,omitempty"`
+		UpdateTimeout           caddy.Duration `json:"update_timeout,omitempty"`
+		AutoUpdate              bool           `json:"auto_update,omitempty"`
 	}
 )
 
@@ -122,11 +123,12 @@ func (a *App) Start() error {
 
 	if a.AutoUpdate {
 		if err := a.ops.StartUpdater(update.Config{
-			AccountID:        a.AccountID,
-			LicenseKey:       a.LicenseKey,
-			IP2LocationToken: a.IP2LocationToken,
-			Frequency:        time.Duration(a.UpdateFrequency),
-			Timeout:          time.Duration(a.UpdateTimeout),
+			AccountID:               a.AccountID,
+			LicenseKey:              a.LicenseKey,
+			IP2LocationToken:        a.IP2LocationToken,
+			DownloadMemoryThreshold: a.DownloadMemoryThreshold,
+			Frequency:               time.Duration(a.UpdateFrequency),
+			Timeout:                 time.Duration(a.UpdateTimeout),
 		}); err != nil {
 			return fmt.Errorf("start updater: %w", err)
 		}
@@ -173,16 +175,17 @@ func (a *App) LookupAll(addr netip.Addr) map[string]string {
 // UnmarshalCaddyfile parses the geo_ops global option block.
 //
 //	geo_ops {
-//	    db_path            /var/lib/geoip
+//	    db_path                   /var/lib/geoip
 //	    auto_update
-//	    account_id         123456
-//	    license_key        xxxxxxxx
-//	    ip2location_token  xxxxxxxx
-//	    update_frequency   24h
-//	    update_timeout     30s
+//	    account_id                123456
+//	    license_key               xxxxxxxx
+//	    ip2location_token         xxxxxxxx
+//	    download_memory_threshold 104857600
+//	    update_frequency          24h
+//	    update_timeout            30s
 //	}
 //
-//nolint:cyclop,funlen,gocognit // nested block is unavoidable
+//nolint:cyclop,funlen,gocognit,revive // nested block is unavoidable; function-length is accepted trade-off
 func (a *App) UnmarshalCaddyfile(dispenser *caddyfile.Dispenser) error {
 	for dispenser.Next() {
 		for dispenser.NextBlock(0) {
@@ -226,6 +229,18 @@ func (a *App) UnmarshalCaddyfile(dispenser *caddyfile.Dispenser) error {
 				}
 
 				a.IP2LocationToken = dispenser.Val()
+
+			case "download_memory_threshold":
+				if !dispenser.NextArg() {
+					return fmt.Errorf("download_memory_threshold requires an argument: %w", dispenser.ArgErr())
+				}
+
+				threshold, err := strconv.ParseInt(dispenser.Val(), 10, 64)
+				if err != nil {
+					return fmt.Errorf("download_memory_threshold has an invalid value: %w", err)
+				}
+
+				a.DownloadMemoryThreshold = threshold
 
 			case "update_frequency":
 				if !dispenser.NextArg() {

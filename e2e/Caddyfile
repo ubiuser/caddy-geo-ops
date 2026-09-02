@@ -23,5 +23,5 @@
 	}
 	respond @gb "matched-GB country={geo.geoip2-city.country.iso_code} city={geo.geoip2-city.city.names.en} lat={geo.geoip2-city.location.latitude}" 200
 
-	respond "nomatch country=[{geo.geoip2-city.country.iso_code}] city=[{geo.geoip2-city.city.names.en}]" 200
+	respond "nomatch country=[{geo.geoip2-city.country.iso_code}] city=[{geo.geoip2-city.city.names.en}] proxy=[{geo.ip2proxy-px10.is_public_proxy}]" 200
 }

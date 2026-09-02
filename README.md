@@ -35,6 +35,7 @@ All three share one set of in-memory databases, owned by a Caddy **app**.
   - [MaxMind (GeoIP2 / GeoLite2)](#maxmind-geoip2--geolite2)
   - [DB-IP](#db-ip)
   - [IP2Location](#ip2location)
+  - [IP2Proxy PX10](#ip2proxy-px10)
   - [Supported editions & required filenames](#supported-editions--required-filenames)
 - [Configuration](#configuration)
   - [The `geo_ops` app (global options)](#the-geo_ops-app-global-options)
@@ -193,6 +194,37 @@ download area).
 > `{geo.geoip2-city.*}` (see [Field reference by edition](#field-reference-by-edition));
 > only the underlying geolocation data differs between vendors.
 
+### IP2Proxy PX10
+
+IP2Proxy PX10 uses the same IP2Location account and `ip2location_token` as the LITE editions
+above — no separate credential. Two editions exist:
+
+- **`PX10MMDB`** — paid, full dataset (VPNs, hosting providers, public/residential proxies,
+  Tor exit nodes).
+- **`PX10LITEMMDB`** — free, public-proxies-only subset. Register at
+  <https://lite.ip2location.com/ip2location-lite> for a token if you don't already have one.
+
+```sh
+curl -L "https://www.ip2location.com/download?token=$TOKEN&file=PX10MMDB" -o px10.zip
+unzip -j px10.zip '*.MMDB' -d /var/lib/geoip
+mv /var/lib/geoip/IP2PROXY-PX10*.MMDB /var/lib/geoip/ip2proxy-px10.mmdb
+```
+
+(Use `file=PX10LITEMMDB` and rename to `ip2proxy-px10-lite.mmdb` for the free edition instead.
+Auto-update writes the canonical name for you either way.)
+
+> PX10's field schema is identical to MaxMind's GeoIP2 Anonymous IP —
+> `{geo.ip2proxy-px10.is_anonymous}` resolves the same field paths as
+> `{geo.geoip2-anonymous-ip.is_anonymous}` (see [Field reference by
+> edition](#field-reference-by-edition)).
+
+**PX10 is a large download (~549MB uncompressed).** The default `update_timeout` (30s) will not
+be enough to complete it — set something like `update_timeout 5m` (tuned to your connection)
+before enabling auto-update for PX10. See [`download_memory_threshold`](#configuration) for how
+large downloads are kept from spiking memory use. It also needs roughly 1.2GB of free space in
+`db_path` during the update (the download's temp zip plus the atomic-write temp, alongside the
+existing file).
+
 ### Supported editions & required filenames
 
 Place files under exactly these names (matching is case-insensitive). Anything else is
@@ -216,6 +248,8 @@ ignored.
 | IP2Location Country (DB1) | `ip2location-country.mmdb` | IP2Location LITE (free) | needs token |
 | IP2Location City (DB11) | `ip2location-city.mmdb` | IP2Location LITE (free) | needs token |
 | IP2Location ASN | `ip2location-asn.mmdb` | IP2Location LITE (free) | needs token |
+| IP2Proxy PX10 | `ip2proxy-px10.mmdb` | IP2Proxy (paid) | needs token |
+| IP2Proxy PX10 LITE | `ip2proxy-px10-lite.mmdb` | IP2Proxy LITE (free) | needs token |
 
 You can load several at once (e.g. a Country db plus an ASN db plus an Anonymous-IP db);
 each contributes its own placeholders.
@@ -237,6 +271,7 @@ Configure the shared app in the Caddyfile **global options** block:
 		account_id         123456           # MaxMind Account ID (only with auto_update)
 		license_key        {env.MAXMIND_KEY}   # MaxMind license key (only with auto_update)
 		ip2location_token  {env.IP2LOCATION_TOKEN}  # IP2Location download token (only with auto_update)
+		download_memory_threshold 104857600  # bytes; below this, zip downloads are read in memory (default 100 MiB)
 		update_frequency   24h              # how often to check (default 24h)
 		update_timeout     1m               # per-download timeout (default 30s)
 	}
@@ -249,7 +284,8 @@ Configure the shared app in the Caddyfile **global options** block:
 | `auto_update` | Enable periodic remote updates of databases already present. | off |
 | `account_id` | MaxMind Account ID (integer). Required to update MaxMind editions. | — |
 | `license_key` | MaxMind license key. Required to update MaxMind editions. | — |
-| `ip2location_token` | IP2Location LITE download token. Required to update IP2Location editions. | — |
+| `ip2location_token` | IP2Location download token (also used for IP2Proxy PX10). Required to update IP2Location/IP2Proxy editions. | — |
+| `download_memory_threshold` | Below this size (bytes), a downloaded zip is read fully into memory before extraction; at or above it, extraction streams to a temp file instead. | `104857600` (100 MiB) |
 | `update_frequency` | Interval between update checks. | `24h` |
 | `update_timeout` | Timeout for a single download. | `30s` |
 
@@ -264,8 +300,9 @@ fresh — it never downloads editions you haven't seeded.
   `account_id` + `license_key`. Without credentials, MaxMind files are left untouched.
 - **DB-IP** editions are refreshed from DB-IP's public monthly URLs and need **no**
   credentials.
-- **IP2Location** LITE editions are refreshed from IP2Location's download endpoint and
-  require `ip2location_token`. Without a token, IP2Location files are left untouched.
+- **IP2Location** LITE editions, and **IP2Proxy PX10** (paid or LITE), are refreshed from
+  IP2Location's download endpoint and require `ip2location_token`. Without a token, these
+  files are left untouched.
 - On startup, a database whose file is already older than `update_frequency` is refreshed
   immediately; fresh files are left alone (so reloading Caddy doesn't re-hit the vendors).
 - Updates are written atomically and **hot-reloaded** with no downtime. Manually replacing
@@ -363,7 +400,7 @@ isp        organization        autonomous_system_number        autonomous_system
 mobile_country_code            mobile_network_code
 ```
 
-**Anonymous IP** (`geoip2-anonymous-ip`) — all booleans
+**Anonymous IP** (`geoip2-anonymous-ip`, `ip2proxy-px10`, `ip2proxy-px10-lite`) — all booleans
 
 ```
 is_anonymous          is_anonymous_vpn       is_hosting_provider
@@ -712,6 +749,7 @@ example.com {
 		account_id       123456
 		license_key      {env.MAXMIND_LICENSE_KEY}
 		ip2location_token {env.IP2LOCATION_TOKEN}
+		download_memory_threshold {env.DOWNLOAD_MEMORY_THRESHOLD}
 		update_frequency 24h
 	}
 }
@@ -758,6 +796,7 @@ Sketch of the app block:
       "account_id": 123456,
       "license_key": "…",
       "ip2location_token": "…",
+      "download_memory_threshold": 104857600,
       "update_frequency": "24h"
     }
   }

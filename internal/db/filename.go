@@ -41,6 +41,9 @@ const (
 	IP2LocationCountry Filename = "ip2location-country.mmdb"
 	IP2LocationCity    Filename = "ip2location-city.mmdb"
 	IP2LocationASN     Filename = "ip2location-asn.mmdb"
+
+	IP2ProxyPX10     Filename = "ip2proxy-px10.mmdb"
+	IP2ProxyPX10Lite Filename = "ip2proxy-px10-lite.mmdb"
 )
 
 // ToFilename converts the file path to a lowercase file name used as the

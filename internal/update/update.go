@@ -1,10 +1,10 @@
 // Package update periodically refreshes database files that already exist in
 // the db folder. MaxMind editions are fetched via the geoipupdate client
 // (Account ID + License Key); DB-IP Lite editions are fetched from hardcoded
-// public URLs; IP2Location LITE editions are fetched from IP2Location's
-// download endpoint using a download token. Downloads are written to a temp
-// file and atomically renamed over the target, which the dirmonitor then
-// picks up and reloads.
+// public URLs; IP2Location LITE editions and IP2Proxy PX10 (paid or LITE) are
+// fetched from IP2Location's download endpoint using a download token.
+// Downloads are written to a temp file and atomically renamed over the
+// target, which the dirmonitor then picks up and reloads.
 package update
 
 import (
@@ -35,30 +35,32 @@ type (
 	// A vendor whose credentials are absent has its databases skipped on every
 	// update pass; the others keep updating normally.
 	Config struct {
-		DBInfoFn         func() map[db.Filename]string
-		DBPath           string
-		LicenseKey       string
-		IP2LocationToken string
-		AccountID        int
-		Frequency        time.Duration
-		Timeout          time.Duration
+		DBInfoFn                func() map[db.Filename]string
+		DBPath                  string
+		LicenseKey              string
+		IP2LocationToken        string
+		AccountID               int
+		Frequency               time.Duration
+		Timeout                 time.Duration
+		DownloadMemoryThreshold int64
 	}
 
 	// Updater refreshes existing databases on a fixed interval.
 	Updater struct {
-		logger           *zap.Logger
-		maxmind          *client.Client
-		httpClient       *http.Client
-		getDBInfo        func() map[db.Filename]string
-		cancel           context.CancelFunc
-		dbPath           string
-		baseURL          string
-		ip2locationURL   string
-		ip2locationToken string
-		wg               sync.WaitGroup
-		frequency        time.Duration
-		timeout          time.Duration
-		closeOnce        sync.Once
+		logger                  *zap.Logger
+		maxmind                 *client.Client
+		httpClient              *http.Client
+		getDBInfo               func() map[db.Filename]string
+		cancel                  context.CancelFunc
+		dbPath                  string
+		baseURL                 string
+		ip2locationURL          string
+		ip2locationToken        string
+		wg                      sync.WaitGroup
+		frequency               time.Duration
+		timeout                 time.Duration
+		downloadMemoryThreshold int64
+		closeOnce               sync.Once
 	}
 
 	// tokenRedactedError wraps an error whose formatted message may embed the
@@ -73,11 +75,28 @@ type (
 		err   error
 		token string
 	}
+
+	// tempFileZipEntry wraps a zip entry's reader opened from a temp file on
+	// disk (see extractMMDBToFile). Close releases all three resources it owns —
+	// the entry reader, the open zip archive, and the temp file itself.
+	tempFileZipEntry struct {
+		io.ReadCloser
+
+		zip  *zip.ReadCloser
+		path string
+	}
 )
 
 const (
 	defaultFrequency = 24 * time.Hour
 	defaultTimeout   = 30 * time.Second
+
+	// defaultDownloadMemoryThreshold: below this, a zip download is read fully
+	// into memory before extraction (today's behaviour); at or above it, extraction
+	// streams to a temp file instead — see extractMMDBToFile. 100 MiB gives
+	// comfortable headroom above the largest LITE compressed download (~41MB for
+	// City) while staying well below IP2Proxy PX10's scale (~549MB uncompressed).
+	defaultDownloadMemoryThreshold = 100 * 1024 * 1024
 
 	dbipBaseURL        = "https://download.db-ip.com/free/"
 	ip2locationBaseURL = "https://www.ip2location.com/download"
@@ -93,6 +112,11 @@ const (
 	errUnknownTypeFmt = "%w for type %s"
 	newRequestErrFmt  = "new request: %w"
 	doRequestErrFmt   = "do request: %w"
+
+	// Shared format strings for zip entry extraction errors.
+	openZipErrFmt      = "open zip: %w"
+	openZipEntryErrFmt = "open zip entry %s: %w"
+	mmdbSuffix         = ".mmdb"
 )
 
 var (
@@ -140,16 +164,21 @@ func New(logger *zap.Logger, config Config) (*Updater, error) {
 		config.Timeout = defaultTimeout
 	}
 
+	if config.DownloadMemoryThreshold <= 0 {
+		config.DownloadMemoryThreshold = defaultDownloadMemoryThreshold
+	}
+
 	u := &Updater{
-		logger:           logger,
-		dbPath:           config.DBPath,
-		httpClient:       &http.Client{},
-		frequency:        config.Frequency,
-		timeout:          config.Timeout,
-		getDBInfo:        config.DBInfoFn,
-		baseURL:          dbipBaseURL,
-		ip2locationURL:   ip2locationBaseURL,
-		ip2locationToken: config.IP2LocationToken,
+		logger:                  logger,
+		dbPath:                  config.DBPath,
+		httpClient:              &http.Client{},
+		frequency:               config.Frequency,
+		timeout:                 config.Timeout,
+		getDBInfo:               config.DBInfoFn,
+		baseURL:                 dbipBaseURL,
+		ip2locationURL:          ip2locationBaseURL,
+		ip2locationToken:        config.IP2LocationToken,
+		downloadMemoryThreshold: config.DownloadMemoryThreshold,
 	}
 
 	// Only build the MaxMind client when credentials are present; DB-IP needs none.
@@ -444,12 +473,15 @@ func redactToken(err error, token string) error {
 	return &tokenRedactedError{err: err, token: token}
 }
 
-// downloadIP2Location fetches an IP2Location LITE edition from its fixed
-// download URL. The request is conditional (If-Modified-Since against the
-// existing file's mtime — this survives the endpoint's redirect to its
-// backing object storage, confirmed against a live account during design).
-// On change, the response is a zip archive; extractMMDB pulls the .mmdb entry
-// out before the atomic write.
+// downloadIP2Location fetches an IP2Location/IP2Proxy edition (LITE Country/
+// City/ASN, or PX10 paid/LITE) from its fixed download URL. The request is
+// conditional (If-Modified-Since against the existing file's mtime — this
+// survives the endpoint's redirect to its backing object storage, confirmed
+// against a live account during design). On change, the response is a zip
+// archive; extraction reads it from memory when the download is small, or
+// streams to a temp file when it's not (see shouldExtractInMemory) so a
+// large edition like PX10 (~549MB uncompressed) can't cause an unbounded
+// memory spike.
 func (u *Updater) downloadIP2Location(ctx context.Context, dbType db.Type, filename db.Filename) (bool, error) {
 	code, ok := ip2locationFileCode(dbType)
 	if !ok {
@@ -492,15 +524,37 @@ func (u *Updater) downloadIP2Location(ctx context.Context, dbType db.Type, filen
 		return false, fmt.Errorf("%w %s for IP2Location file %s", errUnexpectedStatus, resp.Status, code)
 	}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("read body: %w", err)
+	var mmdb io.ReadCloser
+
+	if shouldExtractInMemory(resp.ContentLength, u.downloadMemoryThreshold) {
+		u.logger.Debug("extracting IP2Location download",
+			logfields.Database(string(filename)),
+			logfields.ContentLength(resp.ContentLength),
+			logfields.ExtractionPath("memory"),
+		)
+
+		var data []byte
+
+		data, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return false, fmt.Errorf("read body: %w", err)
+		}
+
+		mmdb, err = extractMMDB(data)
+	} else {
+		u.logger.Debug("extracting IP2Location download",
+			logfields.Database(string(filename)),
+			logfields.ContentLength(resp.ContentLength),
+			logfields.ExtractionPath("disk"),
+		)
+
+		mmdb, err = extractMMDBToFile(u.dbPath, filename, resp.Body)
 	}
 
-	mmdb, err := extractMMDB(data)
 	if err != nil {
 		return false, fmt.Errorf("extract: %w", err)
 	}
+
 	defer mmdb.Close()
 
 	if err = u.writeAtomic(filename, mmdb); err != nil {
@@ -606,23 +660,103 @@ func (u *Updater) writeAtomic(filename db.Filename, r io.Reader) error {
 func extractMMDB(data []byte) (io.ReadCloser, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, fmt.Errorf("open zip: %w", err)
+		return nil, fmt.Errorf(openZipErrFmt, err)
 	}
 
 	for _, f := range zr.File {
-		if !strings.HasSuffix(strings.ToLower(f.Name), ".mmdb") {
+		if !strings.HasSuffix(strings.ToLower(f.Name), mmdbSuffix) {
 			continue
 		}
 
 		rc, openErr := f.Open()
 		if openErr != nil {
-			return nil, fmt.Errorf("open zip entry %s: %w", f.Name, openErr)
+			return nil, fmt.Errorf(openZipEntryErrFmt, f.Name, openErr)
 		}
 
 		return rc, nil
 	}
 
 	return nil, errIP2LocationEntryNotFound
+}
+
+func (t *tempFileZipEntry) Close() error {
+	entryErr := t.ReadCloser.Close()
+	zipErr := t.zip.Close()
+	removeErr := os.Remove(t.path)
+
+	return errors.Join(entryErr, zipErr, removeErr)
+}
+
+// extractMMDBToFile streams r into a temp file in dir, then extracts the
+// .mmdb entry from it as a zip archive read directly off disk via
+// archive/zip.OpenReader — unlike extractMMDB, this never holds the
+// compressed archive in memory, so a large download (e.g. IP2Proxy PX10,
+// ~549MB uncompressed) can't cause a corresponding memory spike. The temp
+// file is named with the same tmpSuffix marker writeAtomic's own temp files
+// use, so a crash mid-download is cleaned up by the existing
+// cleanStaleTemps — no separate cleanup mechanism is needed. The returned
+// ReadCloser owns the temp file's lifecycle; its Close closes the zip
+// archive before removing the file (the open handle must be closed first
+// for Remove to succeed on Windows).
+func extractMMDBToFile(dir string, filename db.Filename, r io.Reader) (io.ReadCloser, error) {
+	tmp, err := os.CreateTemp(dir, string(filename)+".zip"+tmpSuffix+"*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp zip: %w", err)
+	}
+
+	tmpName := tmp.Name()
+
+	if _, err = io.Copy(tmp, r); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+
+		return nil, fmt.Errorf("copy to temp zip: %w", err)
+	}
+
+	if err = tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+
+		return nil, fmt.Errorf("close temp zip: %w", err)
+	}
+
+	zr, err := zip.OpenReader(tmpName)
+	if err != nil {
+		_ = os.Remove(tmpName)
+
+		return nil, fmt.Errorf(openZipErrFmt, err)
+	}
+
+	for _, f := range zr.File {
+		if !strings.HasSuffix(strings.ToLower(f.Name), mmdbSuffix) {
+			continue
+		}
+
+		var rc io.ReadCloser
+
+		rc, err = f.Open()
+		if err != nil {
+			_ = zr.Close()
+			_ = os.Remove(tmpName)
+
+			return nil, fmt.Errorf(openZipEntryErrFmt, f.Name, err)
+		}
+
+		return &tempFileZipEntry{ReadCloser: rc, zip: zr, path: tmpName}, nil
+	}
+
+	_ = zr.Close()
+	_ = os.Remove(tmpName)
+
+	return nil, errIP2LocationEntryNotFound
+}
+
+// shouldExtractInMemory reports whether a zip download of the given size
+// should be read fully into memory before extraction (see extractMMDB),
+// versus streamed to a temp file (see extractMMDBToFile). A negative
+// contentLength means the server didn't report one (e.g. chunked transfer
+// encoding) — treated as "not known to be small" rather than assumed small.
+func shouldExtractInMemory(contentLength, threshold int64) bool {
+	return contentLength >= 0 && contentLength <= threshold
 }
 
 // dbipURL returns the DB-IP Lite download URL for a type and month.
@@ -657,6 +791,12 @@ func ip2locationFileCode(dbType db.Type) (string, bool) {
 
 	case db.IP2LocationASNType:
 		return "DBASNLITEMMDB", true
+
+	case db.IP2ProxyPX10Type:
+		return "PX10MMDB", true
+
+	case db.IP2ProxyPX10LiteType:
+		return "PX10LITEMMDB", true
 
 	default:
 		return "", false

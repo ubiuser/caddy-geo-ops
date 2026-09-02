@@ -66,3 +66,13 @@ func Got(value string) zap.Field {
 func Found(found bool) zap.Field {
 	return zap.Bool("found", found)
 }
+
+// ContentLength is the observed Content-Length of an HTTP download.
+func ContentLength(n int64) zap.Field {
+	return zap.Int64("content_length", n)
+}
+
+// ExtractionPath is which zip-extraction strategy a download used ("memory" or "disk").
+func ExtractionPath(path string) zap.Field {
+	return zap.String("extraction_path", path)
+}

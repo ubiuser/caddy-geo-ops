@@ -25,6 +25,9 @@ const (
 	IP2LocationCountryType Type = "IP2Location-Country"
 	IP2LocationCityType    Type = "IP2Location-City"
 	IP2LocationASNType     Type = "IP2Location-ASN"
+
+	IP2ProxyPX10Type     Type = "IP2Proxy-PX10"
+	IP2ProxyPX10LiteType Type = "IP2Proxy-PX10-LITE"
 )
 
 // ToType converts a filename to a database type.
@@ -80,6 +83,12 @@ func ToType(filename Filename) Type {
 	case IP2LocationASN:
 		return IP2LocationASNType
 
+	case IP2ProxyPX10:
+		return IP2ProxyPX10Type
+
+	case IP2ProxyPX10Lite:
+		return IP2ProxyPX10LiteType
+
 	default:
 		return UnknownType
 	}
@@ -118,11 +127,14 @@ func IsDBIP(t Type) bool {
 	}
 }
 
-// IsIP2Location reports whether a database type is an IP2Location LITE edition
-// (updatable via the hardcoded IP2Location download endpoint).
+// IsIP2Location reports whether a database type is downloadable via
+// IP2Location's token-based download endpoint — the IP2Location LITE
+// editions (Country/City/ASN) and the IP2Proxy PX10 editions (paid and LITE)
+// share the same account/endpoint, just a different file= code.
 func IsIP2Location(t Type) bool {
 	switch t {
-	case IP2LocationCountryType, IP2LocationCityType, IP2LocationASNType:
+	case IP2LocationCountryType, IP2LocationCityType, IP2LocationASNType,
+		IP2ProxyPX10Type, IP2ProxyPX10LiteType:
 		return true
 
 	default:

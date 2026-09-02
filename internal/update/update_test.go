@@ -98,6 +98,27 @@ func TestNonPositiveDefaulted(t *testing.T) {
 	u.Stop()
 }
 
+func TestNewDownloadMemoryThresholdDefault(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Unset -> defaulted.
+	u, err := New(zaptest.NewLogger(t), Config{DBPath: dir, DBInfoFn: nopInfo})
+	require.NoError(t, err)
+	assert.Equal(t, int64(defaultDownloadMemoryThreshold), u.downloadMemoryThreshold)
+
+	// Non-positive -> also defaulted (same rule as Frequency/Timeout).
+	u2, err := New(zaptest.NewLogger(t), Config{DBPath: dir, DBInfoFn: nopInfo, DownloadMemoryThreshold: -1})
+	require.NoError(t, err)
+	assert.Equal(t, int64(defaultDownloadMemoryThreshold), u2.downloadMemoryThreshold)
+
+	// Explicit positive value -> stored as-is.
+	u3, err := New(zaptest.NewLogger(t), Config{DBPath: dir, DBInfoFn: nopInfo, DownloadMemoryThreshold: 1024})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1024), u3.downloadMemoryThreshold)
+}
+
 func TestStopIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -414,6 +435,14 @@ func TestIP2LocationFileCode(t *testing.T) {
 	require.Truef(t, ok, "expected a file code for IP2Location ASN")
 	assert.Equal(t, "DBASNLITEMMDB", code)
 
+	code, ok = ip2locationFileCode(db.IP2ProxyPX10Type)
+	require.Truef(t, ok, "expected a file code for IP2Proxy PX10")
+	assert.Equal(t, "PX10MMDB", code)
+
+	code, ok = ip2locationFileCode(db.IP2ProxyPX10LiteType)
+	require.Truef(t, ok, "expected a file code for IP2Proxy PX10 LITE")
+	assert.Equal(t, "PX10LITEMMDB", code)
+
 	_, ok = ip2locationFileCode(db.GeoIP2CityType)
 	assert.Falsef(t, ok, "non-IP2Location type should not yield a file code")
 }
@@ -487,11 +516,13 @@ func newIP2LocationUpdater(t *testing.T, baseURL, token string) *Updater {
 	t.Helper()
 
 	return &Updater{
-		dbPath:           t.TempDir(),
-		httpClient:       &http.Client{},
-		timeout:          5 * time.Second,
-		ip2locationURL:   baseURL,
-		ip2locationToken: token,
+		logger:                  zaptest.NewLogger(t),
+		dbPath:                  t.TempDir(),
+		httpClient:              &http.Client{},
+		timeout:                 5 * time.Second,
+		ip2locationURL:          baseURL,
+		ip2locationToken:        token,
+		downloadMemoryThreshold: defaultDownloadMemoryThreshold,
 	}
 }
 
@@ -670,4 +701,178 @@ func TestUpdateAllIP2LocationGatedByToken(t *testing.T) {
 	u2 := ip2locationUpdaterWithFile(t, srv.URL, "tok")
 	u2.updateAll(t.Context(), false)
 	assert.NotZerof(t, hits.Load(), "token configured -> IP2Location databases must be checked")
+}
+
+func TestExtractMMDBToFile(t *testing.T) {
+	t.Parallel()
+
+	sample, err := os.ReadFile(filepath.Join("testdata", "ip2proxy-px10-sample.mmdb"))
+	require.NoError(t, err)
+
+	z := buildZip(t, map[string][]byte{
+		"LICENSE-CC-BY-SA-4.0.TXT": []byte("license"),
+		"README.TXT":               []byte("readme"),
+		"IP2PROXY-PX10.MMDB":       sample,
+	})
+
+	dir := t.TempDir()
+
+	rc, err := extractMMDBToFile(dir, db.IP2ProxyPX10, bytes.NewReader(z))
+	require.NoError(t, err)
+
+	got, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Equalf(t, sample, got, "extracted content must match the real sample byte-for-byte")
+
+	require.NoError(t, rc.Close())
+
+	// Close must remove the temp zip file — nothing should remain in dir.
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Emptyf(t, entries, "temp zip file must be removed after Close")
+}
+
+func TestExtractMMDBToFileNoEntry(t *testing.T) {
+	t.Parallel()
+
+	z := buildZip(t, map[string][]byte{
+		"LICENSE-CC-BY-SA-4.0.TXT": []byte("license"),
+	})
+
+	dir := t.TempDir()
+
+	_, err := extractMMDBToFile(dir, db.IP2ProxyPX10, bytes.NewReader(z))
+	assert.ErrorIsf(t, err, errIP2LocationEntryNotFound, "zip without a .mmdb entry")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Emptyf(t, entries, "temp zip file must be removed even on error")
+}
+
+func TestShouldExtractInMemory(t *testing.T) {
+	t.Parallel()
+
+	assert.Truef(t, shouldExtractInMemory(50, 100), "below threshold -> in memory")
+	assert.Truef(t, shouldExtractInMemory(100, 100), "exactly at threshold -> in memory")
+	assert.Falsef(t, shouldExtractInMemory(101, 100), "above threshold -> disk")
+	assert.Falsef(t, shouldExtractInMemory(-1, 100), "unknown size (-1) -> disk, not assumed small")
+}
+
+func TestDownloadIP2LocationSizeAdaptiveExtraction(t *testing.T) {
+	t.Parallel()
+
+	payload := []byte("fake-large-ip2proxy-mmdb-bytes")
+	zipData := buildZip(t, map[string][]byte{
+		"LICENSE-CC-BY-SA-4.0.TXT": []byte("license"),
+		"IP2PROXY-PX10.MMDB":       payload,
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+
+		_, _ = w.Write(zipData)
+	}))
+	// t.Cleanup (not defer): the two subtests below share srv and run in
+	// parallel, so closing it must wait for them to finish, not fire as soon
+	// as this function body returns (which happens immediately once a
+	// parallel subtest calls t.Parallel()).
+	t.Cleanup(srv.Close)
+
+	t.Run("below threshold uses the in-memory path", func(t *testing.T) {
+		t.Parallel()
+
+		u := newIP2LocationUpdater(t, srv.URL, "test-token")
+
+		u.downloadMemoryThreshold = int64(len(zipData)) + 1 // comfortably above
+
+		updated, err := u.downloadIP2Location(t.Context(), db.IP2ProxyPX10Type, db.IP2ProxyPX10)
+		require.NoError(t, err)
+		assert.True(t, updated)
+
+		got, err := os.ReadFile(filepath.Join(u.dbPath, string(db.IP2ProxyPX10)))
+		require.NoError(t, err)
+		assert.Equal(t, payload, got)
+	})
+
+	t.Run("at or above threshold uses the disk-based path", func(t *testing.T) {
+		t.Parallel()
+
+		u := newIP2LocationUpdater(t, srv.URL, "test-token")
+
+		u.downloadMemoryThreshold = 1 // forces the disk-based path for any real payload
+
+		updated, err := u.downloadIP2Location(t.Context(), db.IP2ProxyPX10Type, db.IP2ProxyPX10)
+		require.NoError(t, err)
+		assert.True(t, updated)
+
+		got, err := os.ReadFile(filepath.Join(u.dbPath, string(db.IP2ProxyPX10)))
+		require.NoError(t, err)
+		assert.Equal(t, payload, got)
+
+		// The temp zip file must not remain in dbPath after extraction.
+		entries, err := os.ReadDir(u.dbPath)
+		require.NoError(t, err)
+		assert.Lenf(t, entries, 1, "expected only the final target file, no leftover temp zip")
+	})
+
+	t.Run("unknown content length uses the disk-based path", func(t *testing.T) {
+		t.Parallel()
+
+		unknownLenSrv := chunkedZipServer(t, zipData)
+
+		u := newIP2LocationUpdater(t, unknownLenSrv.URL, "test-token")
+
+		updated, err := u.downloadIP2Location(t.Context(), db.IP2ProxyPX10Type, db.IP2ProxyPX10)
+		require.NoError(t, err)
+		assert.True(t, updated)
+
+		got, err := os.ReadFile(filepath.Join(u.dbPath, string(db.IP2ProxyPX10)))
+		require.NoError(t, err)
+		assert.Equal(t, payload, got)
+	})
+}
+
+// chunkedZipServer serves zipData split across two flushed writes, which
+// forces chunked transfer encoding — the response then carries no
+// Content-Length header, exercising the "size unknown" branch of
+// downloadIP2Location's size-adaptive extraction routing.
+func chunkedZipServer(t *testing.T, zipData []byte) *httptest.Server {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			// require must not be used inside a non-test goroutine (this
+			// handler runs on its own goroutine, not the test's) — assert
+			// plus an explicit early return achieves the same effect.
+			assert.Fail(t, "test server ResponseWriter must support flushing")
+
+			return
+		}
+
+		_, _ = w.Write(zipData[:len(zipData)/2])
+
+		flusher.Flush()
+
+		_, _ = w.Write(zipData[len(zipData)/2:])
+	}))
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
+func TestExtractMMDBToFileCorrupt(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	_, err := extractMMDBToFile(dir, db.IP2ProxyPX10, strings.NewReader("not a zip file"))
+	require.Error(t, err)
+	assert.NotErrorIsf(t, err, errIP2LocationEntryNotFound, "corrupt data is a different error")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Emptyf(t, entries, "temp zip file must be removed even on error")
 }
