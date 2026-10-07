@@ -34,3 +34,7 @@ go.work.sum
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# Superpowers artifacts: kept locally for reference, never committed
+docs/superpowers/
+.superpowers/
