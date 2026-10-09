@@ -199,7 +199,7 @@ func New(logger *zap.Logger, config Config) (*Updater, error) {
 
 // Start launches the periodic update loop.
 func (u *Updater) Start() {
-	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored and invoked in Stop
+	ctx, cancel := context.WithCancel(context.Background())
 
 	u.cancel = cancel
 
@@ -583,6 +583,7 @@ func (u *Updater) fetchDBIP(
 		req.Header.Set("If-Modified-Since", info.ModTime().UTC().Format(http.TimeFormat))
 	}
 
+	//nolint:bodyclose // related PR: https://github.com/timakin/bodyclose/pull/83
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
 		return false, false, fmt.Errorf(doRequestErrFmt, err)

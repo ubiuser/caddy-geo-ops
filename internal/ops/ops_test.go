@@ -49,7 +49,9 @@ func TestOpsLookupCity(t *testing.T) {
 	o, err := ops.New(zaptest.NewLogger(t), ops.Config{DBPath: dir})
 	require.NoError(t, err)
 
-	defer o.Close()
+	t.Cleanup(func() {
+		o.Close()
+	})
 
 	data := o.LookupAll(testIP)
 	require.NotEmptyf(t, data, "expected placeholders for test IP")
@@ -67,7 +69,9 @@ func TestOpsReloadAndDelete(t *testing.T) {
 	o, err := ops.New(zaptest.NewLogger(t), ops.Config{DBPath: dir})
 	require.NoError(t, err)
 
-	defer o.Close()
+	t.Cleanup(func() {
+		o.Close()
+	})
 
 	assert.Emptyf(t, o.LookupAll(testIP), "expected no data before any database is loaded")
 
@@ -93,7 +97,9 @@ func TestReloadUnknownDatabase(t *testing.T) {
 	o, err := ops.New(zaptest.NewLogger(t), ops.Config{DBPath: dir})
 	require.NoError(t, err)
 
-	defer o.Close()
+	t.Cleanup(func() {
+		o.Close()
+	})
 
 	err = o.Reload(filepath.Join(dir, "mystery.mmdb"))
 	assert.ErrorIs(t, err, ops.ErrUnknownDatabase)
@@ -113,7 +119,9 @@ func TestReloadValidateBeforeSwap(t *testing.T) {
 	o, err := ops.New(zaptest.NewLogger(t), ops.Config{DBPath: dir})
 	require.NoError(t, err)
 
-	defer o.Close()
+	t.Cleanup(func() {
+		o.Close()
+	})
 
 	require.Equal(t, "GB", o.LookupAll(testIP)["geo.geoip2-city.country.iso_code"])
 
@@ -139,7 +147,9 @@ func TestStartUpdaterIdempotent(t *testing.T) {
 	o, err := ops.New(zaptest.NewLogger(t), ops.Config{DBPath: t.TempDir()})
 	require.NoError(t, err)
 
-	defer o.Close()
+	t.Cleanup(func() {
+		o.Close()
+	})
 
 	require.NoError(t, o.StartUpdater(update.Config{}))
 

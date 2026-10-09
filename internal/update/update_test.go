@@ -238,7 +238,7 @@ func TestDownloadDBIP(t *testing.T) {
 
 		_, _ = w.Write(gz)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	u := newDBIPUpdater(t, srv.URL+"/free/")
 
@@ -281,7 +281,7 @@ func TestDownloadDBIPFallbackToPreviousMonth(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	u := newDBIPUpdater(t, srv.URL+"/free/")
 
@@ -300,7 +300,7 @@ func TestDownloadDBIPNotPublished(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	u := newDBIPUpdater(t, srv.URL+"/free/")
 
@@ -314,7 +314,7 @@ func TestDownloadDBIPUnexpectedStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	u := newDBIPUpdater(t, srv.URL+"/free/")
 
@@ -406,7 +406,7 @@ func TestDownloadDBIPContextCanceled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	u := newDBIPUpdater(t, srv.URL+"/free/")
 
@@ -479,7 +479,9 @@ func TestExtractMMDB(t *testing.T) {
 	rc, err := extractMMDB(z)
 	require.NoError(t, err)
 
-	defer rc.Close()
+	t.Cleanup(func() {
+		require.NoError(t, rc.Close())
+	})
 
 	got, err := io.ReadAll(rc)
 	require.NoError(t, err)
@@ -555,7 +557,7 @@ func TestDownloadIP2Location(t *testing.T) {
 
 		_, _ = w.Write(zipData)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	u := newIP2LocationUpdater(t, srv.URL, "test-token")
 
@@ -580,7 +582,7 @@ func TestDownloadIP2LocationUnexpectedStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	u := newIP2LocationUpdater(t, srv.URL, "test-token")
 
@@ -604,7 +606,7 @@ func TestDownloadIP2LocationContextCanceled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	u := newIP2LocationUpdater(t, srv.URL, "test-token")
 
@@ -687,7 +689,7 @@ func TestUpdateAllIP2LocationGatedByToken(t *testing.T) {
 		hits.Add(1)
 		w.WriteHeader(http.StatusNotModified)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	// No token configured: updateAll must not hit the server at all. This must
 	// be fatal: if a token-gate regression lets a spurious hit through here,

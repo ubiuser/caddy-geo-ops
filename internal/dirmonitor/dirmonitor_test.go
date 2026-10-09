@@ -53,7 +53,7 @@ func TestDebouncedUpdate(t *testing.T) {
 	dir, updates, _ := newTestMonitor(t)
 
 	path := filepath.Join(dir, "geoip2-city.mmdb")
-	// Several quick writes should coalesce into a single update (100ms debounce).
+	// Some quick writes should coalesce into a single update (100ms debounce).
 	for range 3 {
 		require.NoError(t, os.WriteFile(path, []byte("data"), 0o644))
 		time.Sleep(10 * time.Millisecond)
