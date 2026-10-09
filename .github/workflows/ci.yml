@@ -62,8 +62,8 @@ jobs:
     # failure — only a failed tidy should block the matrix.
     needs: [tidy]
     if: always() && needs.tidy.result != 'failure'
-    # Cross-OS + Go-version matrix. The module floor is Go 1.26 (the code uses the
-    # 1.26 new(expr) form), so the version axis is "go.mod floor" + "stable" rather
+    # Cross-OS + Go-version matrix. The module floor is Go 1.27 (the code uses the
+    # 1.27 new(expr) form), so the version axis is "go.mod floor" + "stable" rather
     # than older releases that wouldn't compile. Windows/macOS catch path- and
     # file-watcher (internal/dirmonitor) differences a Linux-only run would miss —
     # the maintainer develops on Windows, but base CI ran only on Linux.
@@ -71,9 +71,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        # '1.26' = the go.mod language floor (setup-go resolves the latest 1.26.x);
-        # 'stable' = the current release. Bump '1.26' when go.mod's floor moves.
-        go: ['1.26', 'stable']
+        # '1.27' = the go.mod language floor (setup-go resolves the latest 1.27.x);
+        # 'stable' = the current release. Bump '1.27' when go.mod's floor moves.
+        go: ['1.27', 'stable']
     runs-on: ${{ matrix.os }}
     steps:
       # submodules: recursive pulls the MaxMind-DB fixtures (test-data) used by
@@ -92,8 +92,8 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
-          # Use the newest patch for each version axis (e.g. 1.26.5, not a cached
-          # 1.26.4) so builds and tests run on the latest stdlib security fixes.
+          # Use the newest patch for each version axis (e.g. 1.27.2, not a cached
+          # 1.27.1) so builds and tests run on the latest stdlib security fixes.
           check-latest: true
           cache-dependency-path: |
             go.sum
@@ -124,7 +124,7 @@ jobs:
       # Go version, so the other matrix cells would just produce duplicate reports.
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.go == 'stable'
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage.out
           # Public repos upload tokenless; for a private repo set the CODECOV_TOKEN
@@ -172,7 +172,7 @@ jobs:
   # Stable aggregate checks for branch protection. Each passes only if every cell of
   # its matrix job did, so required-status-checks can reference one fixed context
   # ("test-gate" / "lint-gate") instead of the brittle per-cell names like
-  # "test (ubuntu-latest, 1.26)" that change whenever the matrix changes.
+  # "test (ubuntu-latest, 1.27)" that change whenever the matrix changes.
   # `if: always()` makes the gate run (and report) even when a needed job failed.
   test-gate:
     if: always()
