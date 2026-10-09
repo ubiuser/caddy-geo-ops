@@ -8,7 +8,7 @@ placeholders, handler/matcher and CEL examples), see [README.md](README.md).
 A Caddy plugin for geo-location: an `http.handler` and an `http.matcher`, plus value
 placeholders, backed by a shared Caddy **app** that owns the geo-IP databases.
 
-Module path: `github.com/ubiuser/caddy-geo-ops` (Go 1.26).
+Module path: `github.com/ubiuser/caddy-geo-ops` (Go 1.27).
 
 ## Requirements
 
